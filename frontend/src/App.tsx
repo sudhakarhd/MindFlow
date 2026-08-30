@@ -33,17 +33,27 @@ export default function App() {
   }, [])
 
   const fetchLogs = async () => {
-    const { data: wLogs } = await supabase
+    const { data: wLogs, error: wErr } = await supabase
       .from('wellness_logs')
       .select('*')
       .order('created_at', { ascending: false })
-    if (wLogs) setLogs(wLogs)
+    
+    if (wErr) {
+      console.error('Fetch logs error:', wErr)
+    } else if (wLogs) {
+      setLogs(wLogs)
+    }
 
-    const { data: sLogs } = await supabase
+    const { data: sLogs, error: sErr } = await supabase
       .from('somatic_checkins')
       .select('*')
       .order('created_at', { ascending: false })
-    if (sLogs) setSomaticLogs(sLogs)
+    
+    if (sErr) {
+      console.error('Fetch checkins error:', sErr)
+    } else if (sLogs) {
+      setSomaticLogs(sLogs)
+    }
   }
 
   // Tibetan Singing Bowl Synthesis
@@ -116,7 +126,7 @@ export default function App() {
 
     if (file) {
       const fileExt = file.name.split('.').pop() || 'jpg'
-      const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}.${fileExt}`
+      const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 7)}.${fileExt}`
       
       const { error: uploadErr } = await supabase.storage
         .from('wellness-media')
@@ -125,24 +135,23 @@ export default function App() {
           upsert: true 
         })
 
-      if (!uploadErr) {
+      if (uploadErr) {
+        alert('Image upload failed: ' + uploadErr.message)
+      } else {
         const { data: urlData } = supabase.storage.from('wellness-media').getPublicUrl(fileName)
         publicUrl = urlData.publicUrl
-      } else {
-        console.error('Storage upload failed:', uploadErr)
       }
     }
 
     const { error: insertErr } = await supabase.from('wellness_logs').insert([{
       category,
       title,
-      notes,
+      notes: notes || null,
       image_url: publicUrl || null
     }])
 
     if (insertErr) {
-      console.error('Database insert error:', insertErr)
-      alert('Could not save log: ' + insertErr.message)
+      alert('Error saving log: ' + insertErr.message)
     } else {
       setTitle('')
       setNotes('')
@@ -156,14 +165,23 @@ export default function App() {
   }
 
   const logSomaticCheckin = async (sensation: string) => {
-    await supabase.from('somatic_checkins').insert([{ type: 'body_scan', sensation }])
-    await fetchLogs()
-    alert(`Logged: "${sensation}"`)
+    const { error } = await supabase.from('somatic_checkins').insert([{ type: 'body_scan', sensation }])
+    if (error) {
+      alert('Error saving check-in: ' + error.message)
+    } else {
+      await fetchLogs()
+      alert(`Logged: "${sensation}"`)
+    }
   }
 
   const logWater = async (amount = 250) => {
-    await supabase.from('somatic_checkins').insert([{ type: 'water', water_amount_ml: amount }])
-    await fetchLogs()
+    const { error } = await supabase.from('somatic_checkins').insert([{ type: 'water', water_amount_ml: amount }])
+    if (error) {
+      alert('Error logging water: ' + error.message)
+    } else {
+      await fetchLogs()
+      alert(`+${amount}ml water logged! 💧`)
+    }
   }
 
   // Date Filtering Calculations
@@ -175,7 +193,7 @@ export default function App() {
   const todayWaterTotal = todayWaterEntries.reduce((sum, item) => sum + (item.water_amount_ml || 250), 0)
   const todayCheckins = somaticLogs.filter(s => s.type === 'body_scan' && new Date(s.created_at) >= todayStart)
 
-  // Past 7 Days History Calculation for Analysis
+  // Past 7 Days History Calculation
   const past7Days = Array.from({ length: 7 }).map((_, i) => {
     const d = new Date()
     d.setDate(d.getDate() - i)
@@ -238,8 +256,8 @@ export default function App() {
                     <img 
                       src={log.image_url} 
                       alt={log.title} 
-                      className="w-full h-52 object-cover bg-zinc-950" 
-                      loading="lazy"
+                      className="w-full h-56 object-cover bg-zinc-950 border-b border-zinc-800" 
+                      onError={(e) => { (e.target as HTMLElement).style.display = 'none' }}
                     />
                   )}
                   <div className="p-4">
@@ -339,7 +357,6 @@ export default function App() {
         {/* TAB 3: SOMATIC & WATER */}
         {activeTab === 'somatic' && (
           <div className="space-y-5">
-            {/* Water Section */}
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
@@ -348,7 +365,7 @@ export default function App() {
                   </div>
                   <div>
                     <h3 className="font-medium text-sm text-white">Hydration Tracker</h3>
-                    <p className="text-xs text-zinc-400">Total today: <strong className="text-blue-400">{todayWaterTotal} ml</strong></p>
+                    <p className="text-xs text-zinc-400">Total today: <strong className="text-blue-400 text-sm">{todayWaterTotal} ml</strong></p>
                   </div>
                 </div>
               </div>
@@ -395,7 +412,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* Quiet Hours Configuration */}
+            {/* Quiet Hours */}
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
@@ -471,7 +488,7 @@ export default function App() {
           </div>
         )}
 
-        {/* TAB 5: NIGHTLY SUMMARY & 7-DAY ANALYTICS */}
+        {/* TAB 5: NIGHTLY SUMMARY */}
         {activeTab === 'summary' && (
           <div className="space-y-4">
             <div className="bg-gradient-to-br from-indigo-950/40 to-purple-950/20 border border-indigo-900/40 rounded-2xl p-5">
@@ -500,7 +517,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* 7-Day History Table for Health Tracking */}
+            {/* 7-Day History Table */}
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
               <div className="flex items-center gap-2 mb-3">
                 <Calendar size={16} className="text-emerald-400" />
