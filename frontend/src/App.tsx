@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import { supabase } from './supabase'
 import { 
   Camera, Utensils, Footprints, MapPin, Sparkles, 
-  Droplet, Bell, Play, Square, RefreshCw, Moon, BookOpen, Clock
+  Droplet, Bell, Play, Square, RefreshCw, Moon, BookOpen, Clock, Calendar
 } from 'lucide-react'
 
 export default function App() {
@@ -20,8 +20,8 @@ export default function App() {
 
   // Quiet Hours & Settings State
   const [quietHoursEnabled, setQuietHoursEnabled] = useState(true)
-  const [quietStart, setQuietStart] = useState('22:00') // 10 PM
-  const [quietEnd, setQuietEnd] = useState('07:00')   // 7 AM
+  const [quietStart, setQuietStart] = useState('22:00')
+  const [quietEnd, setQuietEnd] = useState('07:00')
 
   // Meditation State
   const [isMeditating, setIsMeditating] = useState(false)
@@ -33,24 +33,30 @@ export default function App() {
   }, [])
 
   const fetchLogs = async () => {
-    const { data: wLogs } = await supabase.from('wellness_logs').select('*').order('created_at', { ascending: false })
+    const { data: wLogs } = await supabase
+      .from('wellness_logs')
+      .select('*')
+      .order('created_at', { ascending: false })
     if (wLogs) setLogs(wLogs)
 
-    const { data: sLogs } = await supabase.from('somatic_checkins').select('*').order('created_at', { ascending: false })
+    const { data: sLogs } = await supabase
+      .from('somatic_checkins')
+      .select('*')
+      .order('created_at', { ascending: false })
     if (sLogs) setSomaticLogs(sLogs)
   }
 
-  // Authentic Tibetan Singing Bowl Acoustic Synthesis (Harmonic Resonance)
+  // Tibetan Singing Bowl Synthesis
   const playTibetanSingingBowl = () => {
     try {
       const ctx = audioContextRef.current || new (window.AudioContext || (window as any).webkitAudioContext)()
       audioContextRef.current = ctx
 
-      const baseFreq = 216 // Deep root frequency (A3 harmonic)
+      const baseFreq = 216
       const harmonics = [
         { freq: baseFreq, gain: 0.6 },
-        { freq: baseFreq * 2.76, gain: 0.35 }, // Overtone 1
-        { freq: baseFreq * 5.4, gain: 0.15 }   // Metallic ring
+        { freq: baseFreq * 2.76, gain: 0.35 },
+        { freq: baseFreq * 5.4, gain: 0.15 }
       ]
 
       harmonics.forEach(({ freq, gain: targetGain }) => {
@@ -59,8 +65,6 @@ export default function App() {
 
         osc.type = 'sine'
         osc.frequency.setValueAtTime(freq, ctx.currentTime)
-
-        // Slow natural acoustic ring decay
         gain.gain.setValueAtTime(targetGain, ctx.currentTime)
         gain.gain.exponentialRampToValueAtTime(0.00001, ctx.currentTime + 4.5)
 
@@ -75,7 +79,7 @@ export default function App() {
     }
   }
 
-  // 2-Minute Interval Bell Logic
+  // 2-Minute Interval Bell
   useEffect(() => {
     let timer: any
     if (isMeditating) {
@@ -111,57 +115,93 @@ export default function App() {
     let publicUrl = ''
 
     if (file) {
-      const fileExt = file.name.split('.').pop()
-      const fileName = `${Date.now()}.${fileExt}`
-      const { data: uploadData, error: uploadErr } = await supabase.storage
+      const fileExt = file.name.split('.').pop() || 'jpg'
+      const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}.${fileExt}`
+      
+      const { error: uploadErr } = await supabase.storage
         .from('wellness-media')
-        .upload(fileName, file, { cacheControl: '3600', upsert: true })
+        .upload(fileName, file, { 
+          contentType: file.type || 'image/jpeg',
+          upsert: true 
+        })
 
-      if (!uploadErr && uploadData) {
+      if (!uploadErr) {
         const { data: urlData } = supabase.storage.from('wellness-media').getPublicUrl(fileName)
         publicUrl = urlData.publicUrl
+      } else {
+        console.error('Storage upload failed:', uploadErr)
       }
     }
 
-    await supabase.from('wellness_logs').insert([{
+    const { error: insertErr } = await supabase.from('wellness_logs').insert([{
       category,
       title,
       notes,
       image_url: publicUrl || null
     }])
 
-    setTitle('')
-    setNotes('')
-    setFile(null)
-    setPreviewUrl(null)
+    if (insertErr) {
+      console.error('Database insert error:', insertErr)
+      alert('Could not save log: ' + insertErr.message)
+    } else {
+      setTitle('')
+      setNotes('')
+      setFile(null)
+      setPreviewUrl(null)
+      setActiveTab('feed')
+      await fetchLogs()
+    }
+
     setLoading(false)
-    setActiveTab('feed')
-    fetchLogs()
   }
 
   const logSomaticCheckin = async (sensation: string) => {
     await supabase.from('somatic_checkins').insert([{ type: 'body_scan', sensation }])
-    fetchLogs()
-    alert(`Logged state: "${sensation}"`)
+    await fetchLogs()
+    alert(`Logged: "${sensation}"`)
   }
 
-  const logWater = async () => {
-    await supabase.from('somatic_checkins').insert([{ type: 'water', water_amount_ml: 250 }])
-    fetchLogs()
-    alert('Logged 250ml water 💧')
+  const logWater = async (amount = 250) => {
+    await supabase.from('somatic_checkins').insert([{ type: 'water', water_amount_ml: amount }])
+    await fetchLogs()
   }
 
-  // Filter Today's Items for Evening Summary
-  const todayDateStr = new Date().toDateString()
-  const todayLogs = logs.filter(l => new Date(l.created_at).toDateString() === todayDateStr)
-  const todayWaterCount = somaticLogs.filter(s => s.type === 'water' && new Date(s.created_at).toDateString() === todayDateStr).length * 250
-  const todayCheckins = somaticLogs.filter(s => s.type === 'body_scan' && new Date(s.created_at).toDateString() === todayDateStr)
+  // Date Filtering Calculations
+  const todayStart = new Date()
+  todayStart.setHours(0, 0, 0, 0)
+
+  const todayLogs = logs.filter(l => new Date(l.created_at) >= todayStart)
+  const todayWaterEntries = somaticLogs.filter(s => s.type === 'water' && new Date(s.created_at) >= todayStart)
+  const todayWaterTotal = todayWaterEntries.reduce((sum, item) => sum + (item.water_amount_ml || 250), 0)
+  const todayCheckins = somaticLogs.filter(s => s.type === 'body_scan' && new Date(s.created_at) >= todayStart)
+
+  // Past 7 Days History Calculation for Analysis
+  const past7Days = Array.from({ length: 7 }).map((_, i) => {
+    const d = new Date()
+    d.setDate(d.getDate() - i)
+    d.setHours(0, 0, 0, 0)
+    const nextD = new Date(d)
+    nextD.setDate(d.getDate() + 1)
+
+    const dayWater = somaticLogs
+      .filter(s => s.type === 'water' && new Date(s.created_at) >= d && new Date(s.created_at) < nextD)
+      .reduce((sum, item) => sum + (item.water_amount_ml || 250), 0)
+
+    const dayCheckinsCount = somaticLogs
+      .filter(s => s.type === 'body_scan' && new Date(s.created_at) >= d && new Date(s.created_at) < nextD).length
+
+    return {
+      date: d.toLocaleDateString('en-US', { weekday: 'short', month: 'numeric', day: 'numeric' }),
+      water: dayWater,
+      scans: dayCheckinsCount
+    }
+  })
 
   return (
     <div className="max-w-md mx-auto min-h-screen bg-zinc-950 text-zinc-100 flex flex-col justify-between pb-20 select-none">
       
       {/* Header */}
-      <header className="px-5 py-4 border-b border-zinc-800 flex justify-between items-center bg-zinc-900/50 backdrop-blur">
+      <header className="px-5 py-4 border-b border-zinc-800 flex justify-between items-center bg-zinc-900/50 backdrop-blur sticky top-0 z-10">
         <div>
           <h1 className="font-semibold text-lg tracking-tight text-white">Daily Wellness</h1>
           <p className="text-xs text-zinc-400">Mindful living & lifestyle journal</p>
@@ -195,7 +235,12 @@ export default function App() {
               logs.map(log => (
                 <div key={log.id} className="bg-zinc-900 border border-zinc-800/80 rounded-2xl overflow-hidden shadow-sm">
                   {log.image_url && (
-                    <img src={log.image_url} alt={log.title} className="w-full h-48 object-cover bg-zinc-950" />
+                    <img 
+                      src={log.image_url} 
+                      alt={log.title} 
+                      className="w-full h-52 object-cover bg-zinc-950" 
+                      loading="lazy"
+                    />
                   )}
                   <div className="p-4">
                     <div className="flex items-center gap-2 mb-1.5">
@@ -203,11 +248,11 @@ export default function App() {
                         {log.category}
                       </span>
                       <span className="text-xs text-zinc-500">
-                        {new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        {new Date(log.created_at).toLocaleDateString([], { month: 'short', day: 'numeric' })} • {new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </span>
                     </div>
-                    <h3 className="font-medium text-zinc-100">{log.title}</h3>
-                    {log.notes && <p className="text-sm text-zinc-400 mt-1">{log.notes}</p>}
+                    <h3 className="font-medium text-zinc-100 text-base">{log.title}</h3>
+                    {log.notes && <p className="text-sm text-zinc-400 mt-1 leading-relaxed">{log.notes}</p>}
                   </div>
                 </div>
               ))
@@ -248,7 +293,7 @@ export default function App() {
               <label className="block text-xs font-medium text-zinc-400 mb-1">Title</label>
               <input 
                 type="text"
-                placeholder="e.g., Healthy lunch, Trail walk, Cafe visit"
+                placeholder="e.g., Healthy lunch, Trail walk, Sunset view"
                 value={title}
                 onChange={e => setTitle(e.target.value)}
                 className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-500"
@@ -257,7 +302,7 @@ export default function App() {
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-zinc-400 mb-1">Photo</label>
+              <label className="block text-xs font-medium text-zinc-400 mb-1">Photo (Optional)</label>
               <input 
                 type="file" 
                 accept="image/*" 
@@ -266,7 +311,7 @@ export default function App() {
                 className="w-full text-xs text-zinc-400 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-zinc-800 file:text-zinc-200 hover:file:bg-zinc-700"
               />
               {previewUrl && (
-                <img src={previewUrl} alt="Preview" className="mt-2 w-full h-40 object-cover rounded-xl border border-zinc-800" />
+                <img src={previewUrl} alt="Preview" className="mt-2 w-full h-44 object-cover rounded-xl border border-zinc-800" />
               )}
             </div>
 
@@ -274,7 +319,7 @@ export default function App() {
               <label className="block text-xs font-medium text-zinc-400 mb-1">Notes / Reflection</label>
               <textarea 
                 rows={3}
-                placeholder="How did you feel? Any notable observations?"
+                placeholder="How did you feel? What ingredients or thoughts were present?"
                 value={notes}
                 onChange={e => setNotes(e.target.value)}
                 className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500"
@@ -286,12 +331,12 @@ export default function App() {
               disabled={loading}
               className="w-full py-3 bg-emerald-500 hover:bg-emerald-600 text-zinc-950 font-semibold rounded-xl text-sm transition-colors flex justify-center items-center gap-2"
             >
-              {loading ? 'Saving to Cloud...' : 'Save Entry'}
+              {loading ? 'Uploading & Saving...' : 'Save Entry'}
             </button>
           </form>
         )}
 
-        {/* TAB 3: SOMATIC & QUIET HOURS */}
+        {/* TAB 3: SOMATIC & WATER */}
         {activeTab === 'somatic' && (
           <div className="space-y-5">
             {/* Water Section */}
@@ -303,16 +348,24 @@ export default function App() {
                   </div>
                   <div>
                     <h3 className="font-medium text-sm text-white">Hydration Tracker</h3>
-                    <p className="text-xs text-zinc-400">Total today: {todayWaterCount} ml</p>
+                    <p className="text-xs text-zinc-400">Total today: <strong className="text-blue-400">{todayWaterTotal} ml</strong></p>
                   </div>
                 </div>
               </div>
-              <button 
-                onClick={logWater}
-                className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 font-medium rounded-xl text-xs text-white transition-colors"
-              >
-                + Drink 250ml Water
-              </button>
+              <div className="grid grid-cols-2 gap-2">
+                <button 
+                  onClick={() => logWater(250)}
+                  className="py-2.5 bg-blue-600 hover:bg-blue-700 font-medium rounded-xl text-xs text-white transition-colors"
+                >
+                  + Glass (250ml)
+                </button>
+                <button 
+                  onClick={() => logWater(500)}
+                  className="py-2.5 bg-blue-500/20 text-blue-400 border border-blue-500/30 hover:bg-blue-500/30 font-medium rounded-xl text-xs transition-colors"
+                >
+                  + Bottle (500ml)
+                </button>
+              </div>
             </div>
 
             {/* Somatic Check-In Section */}
@@ -418,7 +471,7 @@ export default function App() {
           </div>
         )}
 
-        {/* TAB 5: NIGHTLY SUMMARY & REFLECTION */}
+        {/* TAB 5: NIGHTLY SUMMARY & 7-DAY ANALYTICS */}
         {activeTab === 'summary' && (
           <div className="space-y-4">
             <div className="bg-gradient-to-br from-indigo-950/40 to-purple-950/20 border border-indigo-900/40 rounded-2xl p-5">
@@ -438,12 +491,31 @@ export default function App() {
                 <span className="block text-[10px] uppercase tracking-wider text-zinc-500 mt-0.5">Entries</span>
               </div>
               <div className="bg-zinc-900 border border-zinc-800 p-3 rounded-xl text-center">
-                <span className="text-lg font-bold text-blue-400">{todayWaterCount} <span className="text-xs font-normal">ml</span></span>
+                <span className="text-lg font-bold text-blue-400">{todayWaterTotal} <span className="text-xs font-normal">ml</span></span>
                 <span className="block text-[10px] uppercase tracking-wider text-zinc-500 mt-0.5">Water</span>
               </div>
               <div className="bg-zinc-900 border border-zinc-800 p-3 rounded-xl text-center">
                 <span className="text-lg font-bold text-purple-400">{todayCheckins.length}</span>
                 <span className="block text-[10px] uppercase tracking-wider text-zinc-500 mt-0.5">Body Scans</span>
+              </div>
+            </div>
+
+            {/* 7-Day History Table for Health Tracking */}
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <Calendar size={16} className="text-emerald-400" />
+                <h3 className="text-xs font-semibold text-zinc-200 uppercase tracking-wider">Past 7 Days History</h3>
+              </div>
+              <div className="space-y-2">
+                {past7Days.map((day, idx) => (
+                  <div key={idx} className="flex justify-between items-center py-1.5 border-b border-zinc-800/60 text-xs last:border-0">
+                    <span className="text-zinc-400 font-medium">{day.date}</span>
+                    <div className="flex gap-4">
+                      <span className="text-blue-400 font-medium">{day.water} ml</span>
+                      <span className="text-purple-400">{day.scans} scans</span>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
 
