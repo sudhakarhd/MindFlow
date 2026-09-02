@@ -12,13 +12,13 @@ export default function App() {
   const [somaticLogs, setSomaticLogs] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
 
-  // Lightweight Dynamic Profile System
+// Lightweight Dynamic Profile System (v2 clean refresh)
   const [profiles, setProfiles] = useState<string[]>(() => {
-    const saved = localStorage.getItem('mindflow_profiles')
-    return saved ? JSON.parse(saved) : ['Sudhakar', 'Bindu','Sandy','Default','Mind1','Mind2','Mind3']
+    const saved = localStorage.getItem('mindflow_profiles_v2')
+    return saved ? JSON.parse(saved) : ['Sudhakar', 'Bindu', 'Sandy', 'Default', 'Mind1', 'Mind2', 'Mind3']
   })
   const [currentUser, setCurrentUser] = useState<string>(() => {
-    return localStorage.getItem('mindflow_active_user') || 'Default'
+    return localStorage.getItem('mindflow_active_user_v2') || 'Default'
   })
   const [feedFilter, setFeedFilter] = useState<'all' | 'mine'>('all')
   const [isAddingProfile, setIsAddingProfile] = useState(false)
@@ -68,7 +68,7 @@ export default function App() {
   // Profile Management Handlers
   const handleSelectUser = (name: string) => {
     setCurrentUser(name)
-    localStorage.setItem('mindflow_active_user', name)
+    localStorage.setItem('mindflow_active_user_v2', name)
   }
 
   const handleAddProfile = (e: React.FormEvent) => {
@@ -77,7 +77,7 @@ export default function App() {
     if (trimmed && !profiles.includes(trimmed)) {
       const updated = [...profiles, trimmed]
       setProfiles(updated)
-      localStorage.setItem('mindflow_profiles', JSON.stringify(updated))
+      localStorage.setItem('mindflow_profiles_v2', JSON.stringify(updated))
       handleSelectUser(trimmed)
       setNewProfileName('')
       setIsAddingProfile(false)
