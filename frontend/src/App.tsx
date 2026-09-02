@@ -15,10 +15,10 @@ export default function App() {
   // Lightweight Dynamic Profile System
   const [profiles, setProfiles] = useState<string[]>(() => {
     const saved = localStorage.getItem('mindflow_profiles')
-    return saved ? JSON.parse(saved) : ['Sudhakar', 'Spouse']
+    return saved ? JSON.parse(saved) : ['Sudhakar', 'Bindu','Sandy','Default','Mind1','Mind2','Mind3']
   })
   const [currentUser, setCurrentUser] = useState<string>(() => {
-    return localStorage.getItem('mindflow_active_user') || 'Sudhakar'
+    return localStorage.getItem('mindflow_active_user') || 'Default'
   })
   const [feedFilter, setFeedFilter] = useState<'all' | 'mine'>('all')
   const [isAddingProfile, setIsAddingProfile] = useState(false)
@@ -470,7 +470,7 @@ export default function App() {
                           {new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </span>
                       </div>
-                      <span className="text-[11px] text-zinc-400 font-medium">by {log.author || 'Family'}</span>
+                      <span className="text-[11px] text-zinc-400 font-medium">by {log.author || 'Onenness'}</span>
                     </div>
                     <h3 className="font-medium text-zinc-100 text-sm leading-snug">{log.title}</h3>
                     {log.notes && <p className="text-xs text-zinc-400 mt-1 leading-relaxed">{log.notes}</p>}
