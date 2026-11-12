@@ -51,8 +51,6 @@ export default function App() {
   const [manualItemsText, setManualItemsText] = useState('')
   const [manualCategory, setManualCategory] = useState<'Produce' | 'Dairy' | 'Meat' | 'Pantry' | 'Household'>('Pantry')
 
-  receiptCameraRef: useRef<HTMLInputElement | null>(null)
-  receiptGalleryRef: useRef<HTMLInputElement | null>(null)
   const receiptCameraRef = useRef<HTMLInputElement>(null)
   const receiptGalleryRef = useRef<HTMLInputElement>(null)
 
@@ -131,7 +129,6 @@ export default function App() {
     const { data } = await supabase.from('grocery_bills').select('*').order('created_at', { ascending: false })
     if (data) {
       setGroceryBills(data)
-      // Extract unique shared emails across bills
       const allShared = new Set<string>()
       data.forEach(b => {
         if (Array.isArray(b.shared_with)) {
@@ -188,14 +185,12 @@ export default function App() {
 
       const masterGain = ctx.createGain()
       masterGain.gain.setValueAtTime(0.001, ctx.currentTime)
-      masterGain.gain.linearRampToValueAtTime(0.08, ctx.currentTime + 3.0) // 3-second slow fade-in
+      masterGain.gain.linearRampToValueAtTime(0.08, ctx.currentTime + 3.0)
 
-      // 128Hz Sub-octave (512 / 4)
       const osc1 = ctx.createOscillator()
       osc1.type = 'sine'
       osc1.frequency.setValueAtTime(128, ctx.currentTime)
 
-      // 256Hz Subtle Overtone (512 / 2)
       const osc2 = ctx.createOscillator()
       osc2.type = 'sine'
       osc2.frequency.setValueAtTime(256, ctx.currentTime)
@@ -270,33 +265,45 @@ export default function App() {
       : (currentMinutes >= quietStartMin && currentMinutes < quietEndMin)
   }
 
-  // Smart Engine: Quiet Hours & Break Reminders with visibilitychange & focus blocking
+  // Smart Engine: Persistent Timestamp Check via localStorage (No more modulo per-minute bug)
   const setupSmartNotificationEngine = () => {
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission()
     }
 
-    const checkInterval = () => {
+    const checkReminder = () => {
       if (!reminderEnabled) return
       if (isInQuietHours()) return
 
-      if (new Date().getMinutes() % reminderFrequencyMin === 0) {
+      const lastNotifiedStr = localStorage.getItem('mindflow_last_notified_at')
+      const nowMs = Date.now()
+      const intervalMs = reminderFrequencyMin * 60 * 1000
+
+      if (!lastNotifiedStr || (nowMs - Number(lastNotifiedStr)) >= intervalMs) {
         if ('Notification' in window && Notification.permission === 'granted') {
           new Notification('🌿 MindFlow: Gentle Awareness Break', { 
             body: 'Unclench your jaw, drink a sip of water, and take one deep conscious breath.' 
           })
+          localStorage.setItem('mindflow_last_notified_at', nowMs.toString())
         }
       }
     }
 
-    const intervalId = setInterval(checkInterval, 60000)
+    const intervalId = setInterval(checkReminder, 30000)
 
     const handleVisibilityOrFocus = () => {
       if (document.visibilityState === 'visible' && reminderEnabled && !isInQuietHours()) {
-        if ('Notification' in window && Notification.permission === 'granted') {
-          new Notification('🌿 MindFlow: Gentle Awareness Break', { 
-            body: 'Unclench your jaw, drink a sip of water, and take one deep conscious breath.' 
-          })
+        const lastNotifiedStr = localStorage.getItem('mindflow_last_notified_at')
+        const nowMs = Date.now()
+        const intervalMs = reminderFrequencyMin * 60 * 1000
+
+        if (!lastNotifiedStr || (nowMs - Number(lastNotifiedStr)) >= intervalMs) {
+          if ('Notification' in window && Notification.permission === 'granted') {
+            new Notification('🌿 MindFlow: Gentle Awareness Break', { 
+              body: 'Unclench your jaw, drink a sip of water, and take one deep conscious breath.' 
+            })
+            localStorage.setItem('mindflow_last_notified_at', nowMs.toString())
+          }
         }
       }
     }
@@ -327,6 +334,7 @@ export default function App() {
       new Notification('🌿 MindFlow Test Notification', {
         body: 'Notifications are working correctly and active on your device!'
       })
+      localStorage.setItem('mindflow_last_notified_at', Date.now().toString())
       alert('Test notification sent!')
     } else {
       alert('Notification permission was denied.')
@@ -437,7 +445,7 @@ export default function App() {
     setLoading(false)
   }
 
-  // Robust Likes & Comments with Error Alerting & Immediate Refresh
+  // Robust Likes & Comments using { log_id, user_id, author } and { log_id, user_id, author, content }
   const toggleLike = async (logId: string) => {
     try {
       const existing = likes.find(l => l.log_id === logId && l.user_id === currentUserId)
@@ -556,7 +564,6 @@ export default function App() {
         }
       }
 
-      // Automatically save to grocery_bills
       const billObj = {
         user_id: currentUserId,
         store_name: (parsed as any).store_name || 'Grocery Store',
