@@ -538,11 +538,16 @@ export default function App() {
       const { data: urlData } = supabase.storage.from('wellness-media').getPublicUrl(fileName)
       const publicUrl = urlData.publicUrl
 
-      const response = await fetch('/ai/parse-receipt', {
+      const response = await fetch('/api/scan-receipt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: publicUrl })
       })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        throw new Error(errorText || `Server error: ${response.status}`)
+      }
 
       const jsonRes = await response.json()
       let parsed = {}
@@ -566,6 +571,7 @@ export default function App() {
 
       const billObj = {
         user_id: currentUserId,
+        owner_email: session?.user?.email,
         store_name: (parsed as any).store_name || 'Grocery Store',
         receipt_date: (parsed as any).receipt_date || new Date().toISOString().split('T')[0],
         total_amount: (parsed as any).total_amount || 0,
@@ -603,6 +609,7 @@ export default function App() {
 
       const { error } = await supabase.from('grocery_bills').insert([{
         user_id: currentUserId,
+        owner_email: session?.user?.email,
         store_name: manualStore,
         receipt_date: manualDate,
         total_amount: parseFloat(manualTotal) || 0,
