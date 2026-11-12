@@ -4,6 +4,7 @@ import { supabase } from '../supabase'
 export const Auth: React.FC = () => {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [displayName, setDisplayName] = useState('')
   const [isSignUp, setIsSignUp] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
   const [loading, setLoading] = useState(false)
@@ -15,8 +16,18 @@ export const Auth: React.FC = () => {
 
     try {
       if (isSignUp) {
-        const { error } = await supabase.auth.signUp({ email, password })
+        const { data, error } = await supabase.auth.signUp({ email, password })
         if (error) throw error
+        if (data.user) {
+          const { error: profileError } = await supabase.from('user_profiles').upsert([{
+            id: data.user.id,
+            email: email,
+            display_name: displayName.trim() || email.split('@')[0]
+          }])
+          if (profileError) {
+            console.error('Error creating profile:', profileError)
+          }
+        }
         alert('Check your email for the confirmation link to activate your account!')
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password })
@@ -39,6 +50,20 @@ export const Auth: React.FC = () => {
       </p>
 
       <form onSubmit={handleAuth} className="space-y-4">
+        {isSignUp && (
+          <div>
+            <label className="block text-xs font-medium text-zinc-400 mb-1">Display Name</label>
+            <input
+              type="text"
+              placeholder="Your Name (e.g., Alex)"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              required={isSignUp}
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500"
+            />
+          </div>
+        )}
+
         <div>
           <label className="block text-xs font-medium text-zinc-400 mb-1">Email</label>
           <input
@@ -80,6 +105,7 @@ export const Auth: React.FC = () => {
 
       <div className="mt-4 text-center">
         <button
+          type="button"
           onClick={() => { setIsSignUp(!isSignUp); setErrorMsg(''); }}
           className="text-xs text-zinc-400 hover:text-white transition-colors"
         >
