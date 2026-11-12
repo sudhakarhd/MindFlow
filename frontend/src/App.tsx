@@ -1,28 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { supabase } from './supabase'
+import { Auth } from './components/Auth'
+import { playPourSound } from './utils/audio'
 import { 
   Camera, Image as ImageIcon, Utensils, Footprints, MapPin, Sparkles, 
   Droplet, Bell, Play, Square, RefreshCw, Moon, BookOpen, Clock, Calendar,
-  Activity, Plus
+  Activity, LogOut, Music, Volume2
 } from 'lucide-react'
 
 export default function App() {
+  const [session, setSession] = useState<any>(null)
   const [activeTab, setActiveTab] = useState<'feed' | 'capture' | 'somatic' | 'meditate' | 'summary'>('feed')
   const [logs, setLogs] = useState<any[]>([])
   const [somaticLogs, setSomaticLogs] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
-
-// Lightweight Dynamic Profile System (v2 clean refresh)
-  const [profiles, setProfiles] = useState<string[]>(() => {
-    const saved = localStorage.getItem('mindflow_profiles_v2')
-    return saved ? JSON.parse(saved) : ['Sudhakar', 'Bindu', 'Sandy', 'Default', 'Mind1', 'Mind2', 'Mind3']
-  })
-  const [currentUser, setCurrentUser] = useState<string>(() => {
-    return localStorage.getItem('mindflow_active_user_v2') || 'Default'
-  })
   const [feedFilter, setFeedFilter] = useState<'all' | 'mine'>('all')
-  const [isAddingProfile, setIsAddingProfile] = useState(false)
-  const [newProfileName, setNewProfileName] = useState('')
 
   // Capture Form State
   const [category, setCategory] = useState<'meal' | 'activity' | 'place' | 'note'>('meal')
@@ -33,23 +25,43 @@ export default function App() {
   const cameraInputRef = useRef<HTMLInputElement>(null)
   const galleryInputRef = useRef<HTMLInputElement>(null)
 
-  // Quiet Hours & Work Hours Reminders
+  // Reminders & Active Scheduling
   const [quietHoursEnabled, setQuietHoursEnabled] = useState(true)
   const [quietStart, setQuietStart] = useState('22:00')
   const [quietEnd, setQuietEnd] = useState('07:00')
-  const [workHoursEnabled, setWorkHoursEnabled] = useState(true)
-  const [workStart, setWorkStart] = useState('09:00')
-  const [workEnd, setWorkEnd] = useState('18:00')
+  const [reminderEnabled, setReminderEnabled] = useState(true)
+  const [reminderFrequencyMin, setReminderFrequencyMin] = useState(45)
 
-  // Meditation State
+  // Meditation State & Audio Options
+  const [meditationMode, setMeditationMode] = useState<'singing_bowl' | 'calm_drone' | 'guided_breath'>('singing_bowl')
   const [isMeditating, setIsMeditating] = useState(false)
   const [meditationSeconds, setMeditationSeconds] = useState(0)
   const audioContextRef = useRef<AudioContext | null>(null)
+  const droneOscillatorRef = useRef<OscillatorNode | null>(null)
+  const droneGainRef = useRef<GainNode | null>(null)
+
+  // Session Listener
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session)
+    })
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session)
+    })
+
+    return () => subscription.unsubscribe()
+  }, [])
 
   useEffect(() => {
-    fetchLogs()
-    setupPeriodicReminders()
-  }, [])
+    if (session) {
+      fetchLogs()
+      setupSmartNotificationEngine()
+    }
+  }, [session, quietHoursEnabled, quietStart, quietEnd, reminderEnabled, reminderFrequencyMin])
+
+  const userDisplayName = session?.user?.email?.split('@')[0] || 'User'
+  const currentUserId = session?.user?.id
 
   const fetchLogs = async () => {
     const { data: wLogs } = await supabase
@@ -65,26 +77,11 @@ export default function App() {
     if (sLogs) setSomaticLogs(sLogs)
   }
 
-  // Profile Management Handlers
-  const handleSelectUser = (name: string) => {
-    setCurrentUser(name)
-    localStorage.setItem('mindflow_active_user_v2', name)
+  const handleSignOut = async () => {
+    await supabase.auth.signOut()
   }
 
-  const handleAddProfile = (e: React.FormEvent) => {
-    e.preventDefault()
-    const trimmed = newProfileName.trim()
-    if (trimmed && !profiles.includes(trimmed)) {
-      const updated = [...profiles, trimmed]
-      setProfiles(updated)
-      localStorage.setItem('mindflow_profiles_v2', JSON.stringify(updated))
-      handleSelectUser(trimmed)
-      setNewProfileName('')
-      setIsAddingProfile(false)
-    }
-  }
-
-  // Web Audio: Tibetan Singing Bowl Sound
+  // Tibetan Singing Bowl Sound
   const playTibetanSingingBowl = () => {
     try {
       const ctx = audioContextRef.current || new (window.AudioContext || (window as any).webkitAudioContext)()
@@ -114,52 +111,67 @@ export default function App() {
     }
   }
 
-  // Web Audio: Water Pouring Effect
-  const playWaterPourSound = () => {
+  // Calming Ambient Drone (Synthesized 432Hz ambient sound)
+  const startCalmDrone = () => {
     try {
       const ctx = audioContextRef.current || new (window.AudioContext || (window as any).webkitAudioContext)()
       audioContextRef.current = ctx
 
-      const bufferSize = ctx.sampleRate * 2.5
-      const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate)
-      const output = noiseBuffer.getChannelData(0)
-      let b0 = 0, b1 = 0, b2 = 0
-      for (let i = 0; i < bufferSize; i++) {
-        const white = Math.random() * 2 - 1
-        b0 = 0.99 * b0 + white * 0.05
-        b1 = 0.95 * b1 + white * 0.11
-        b2 = 0.85 * b2 + white * 0.25
-        output[i] = (b0 + b1 + b2) * 0.15
-      }
-
-      const noiseSource = ctx.createBufferSource()
-      noiseSource.buffer = noiseBuffer
-
-      const filter = ctx.createBiquadFilter()
-      filter.type = 'bandpass'
-      filter.frequency.setValueAtTime(600, ctx.currentTime)
-      filter.frequency.exponentialRampToValueAtTime(1200, ctx.currentTime + 2.2)
-      filter.Q.setValueAtTime(3.0, ctx.currentTime)
-
+      const osc = ctx.createOscillator()
       const gain = ctx.createGain()
-      gain.gain.setValueAtTime(0.05, ctx.currentTime)
-      gain.gain.linearRampToValueAtTime(0.4, ctx.currentTime + 0.3)
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 2.5)
 
-      noiseSource.connect(filter)
-      filter.connect(gain)
+      osc.type = 'sine'
+      osc.frequency.setValueAtTime(432 / 4, ctx.currentTime) // 108Hz grounding pitch
+      gain.gain.setValueAtTime(0.001, ctx.currentTime)
+      gain.gain.linearRampToValueAtTime(0.15, ctx.currentTime + 2.0)
+
+      osc.connect(gain)
       gain.connect(ctx.destination)
+      osc.start()
 
-      noiseSource.start()
-      noiseSource.stop(ctx.currentTime + 2.5)
+      droneOscillatorRef.current = osc
+      droneGainRef.current = gain
     } catch (e) {
-      console.error('Water audio error:', e)
+      console.error('Drone error:', e)
     }
   }
 
-  // Periodic Reminders: Water & Posture Check
-  const setupPeriodicReminders = () => {
-    const checkReminder = () => {
+  const stopCalmDrone = () => {
+    try {
+      if (droneGainRef.current && audioContextRef.current) {
+        droneGainRef.current.gain.linearRampToValueAtTime(0.001, audioContextRef.current.currentTime + 1.0)
+        setTimeout(() => {
+          droneOscillatorRef.current?.stop()
+          droneOscillatorRef.current?.disconnect()
+          droneOscillatorRef.current = null
+          droneGainRef.current = null
+        }, 1000)
+      }
+    } catch (e) {
+      console.error(e)
+    }
+  }
+
+  // Voice Prompt Generator for Guided Breath Focus
+  const speakGuidance = (text: string) => {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel()
+      const utterance = new SpeechSynthesisUtterance(text)
+      utterance.rate = 0.85
+      utterance.pitch = 0.95
+      window.speechSynthesis.speak(utterance)
+    }
+  }
+
+  // Smart Engine: Quiet Hours & Break Reminders
+  const setupSmartNotificationEngine = () => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission()
+    }
+
+    const checkInterval = () => {
+      if (!reminderEnabled) return
+
       const now = new Date()
       const currentMinutes = now.getHours() * 60 + now.getMinutes()
 
@@ -176,51 +188,65 @@ export default function App() {
 
       if (inQuietHours) return
 
-      if (workHoursEnabled) {
-        const [wStartH, wStartM] = workStart.split(':').map(Number)
-        const [wEndH, wEndM] = workEnd.split(':').map(Number)
-        const inWorkHours = currentMinutes >= (wStartH * 60 + wStartM) && currentMinutes <= (wEndH * 60 + wEndM)
-        if (inWorkHours && now.getMinutes() === 0) {
-          if ('Notification' in window && Notification.permission === 'granted') {
-            new Notification('🧘 MindFlow: Stand Up & Unwind', { body: 'Step away from your chair, roll your shoulders, and breathe.' })
-          }
+      // Triggers at the set minute interval (e.g., every 45 or 60 min)
+      if (now.getMinutes() % reminderFrequencyMin === 0) {
+        if ('Notification' in window && Notification.permission === 'granted') {
+          new Notification('🌿 MindFlow: Gentle Awareness Break', { 
+            body: 'Unclench your jaw, drink a sip of water, and take one deep conscious breath.' 
+          })
         }
       }
     }
 
-    const interval = setInterval(checkReminder, 60000)
-    return () => clearInterval(interval)
+    const intervalId = setInterval(checkInterval, 60000)
+    return () => clearInterval(intervalId)
   }
 
-  // Meditation Interval Tracker
+  // Meditation Timer Controller
   useEffect(() => {
     let timer: any
     if (isMeditating) {
-      playTibetanSingingBowl()
+      if (meditationMode === 'singing_bowl') playTibetanSingingBowl()
+      if (meditationMode === 'calm_drone') startCalmDrone()
+      if (meditationMode === 'guided_breath') {
+        playTibetanSingingBowl()
+        speakGuidance("Close your eyes. Inhale slowly through your nose... and release.")
+      }
+
       timer = setInterval(() => {
         setMeditationSeconds(prev => {
           const next = prev + 1
-          if (next > 0 && next % 120 === 0) {
+          if (meditationMode === 'singing_bowl' && next > 0 && next % 120 === 0) {
             playTibetanSingingBowl()
+          }
+          if (meditationMode === 'guided_breath' && next === 60) {
+            speakGuidance("Notice any tension in your shoulders. Relax your belly and soften your gaze.")
           }
           return next
         })
       }, 1000)
+    } else {
+      if (meditationMode === 'calm_drone') stopCalmDrone()
     }
-    return () => clearInterval(timer)
-  }, [isMeditating])
+
+    return () => {
+      clearInterval(timer)
+      if (meditationMode === 'calm_drone') stopCalmDrone()
+    }
+  }, [isMeditating, meditationMode])
 
   const stopMeditation = async () => {
     setIsMeditating(false)
     const minutes = Math.max(1, Math.round(meditationSeconds / 60))
 
-    if (meditationSeconds >= 30) {
+    if (meditationSeconds >= 20) {
       await supabase.from('wellness_logs').insert([{
         category: 'meditation',
-        title: `Mindfulness Sitting (${minutes} min)`,
-        notes: `Anchored sitting session with 2-minute interval bell.`,
+        title: `Mindful Sitting (${minutes} min - ${meditationMode.replace('_', ' ')})`,
+        notes: `Body, breath, and awareness reset.`,
         duration_minutes: minutes,
-        author: currentUser,
+        author: userDisplayName,
+        user_id: currentUserId,
         is_shared: true
       }])
       await fetchLogs()
@@ -229,7 +255,6 @@ export default function App() {
     setMeditationSeconds(0)
   }
 
-  // Handle Photo Picker
   const handleImageFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const selected = e.target.files[0]
@@ -263,7 +288,8 @@ export default function App() {
       title,
       notes: notes || null,
       image_url: publicUrl || null,
-      author: currentUser,
+      author: userDisplayName,
+      user_id: currentUserId,
       is_shared: true
     }])
 
@@ -280,13 +306,15 @@ export default function App() {
     await supabase.from('somatic_checkins').insert([{ 
       type: 'body_scan', 
       sensation,
-      author: currentUser 
+      author: userDisplayName,
+      user_id: currentUserId
     }])
     await supabase.from('wellness_logs').insert([{
       category: 'somatic',
       title: `Somatic Check-In: ${sensation}`,
       notes: `Body scan registered without labeling.`,
-      author: currentUser,
+      author: userDisplayName,
+      user_id: currentUserId,
       is_shared: true
     }])
     await fetchLogs()
@@ -294,45 +322,67 @@ export default function App() {
   }
 
   const logWater = async (amount = 250) => {
-    playWaterPourSound()
+    playPourSound()
     await supabase.from('somatic_checkins').insert([{ 
       type: 'water', 
       water_amount_ml: amount,
-      author: currentUser 
+      author: userDisplayName,
+      user_id: currentUserId
     }])
     await fetchLogs()
   }
 
-  // Date Filtering Helpers (Local Calendar Days)
+  // Format Helper for Date and Time
+  const formatDateTime = (dateString: string) => {
+    const d = new Date(dateString)
+    const datePart = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    const timePart = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    return `${datePart} • ${timePart}`
+  }
+
   const isSameLocalDate = (dateA: Date, dateB: Date) => {
     return dateA.getFullYear() === dateB.getFullYear() &&
            dateA.getMonth() === dateB.getMonth() &&
            dateA.getDate() === dateB.getDate()
   }
 
-  const now = new Date()
-  const todayLogs = logs.filter(l => isSameLocalDate(new Date(l.created_at), now) && l.author === currentUser)
-  const todayWaterLogs = somaticLogs.filter(s => s.type === 'water' && isSameLocalDate(new Date(s.created_at), now) && s.author === currentUser)
-  const todayWaterTotal = todayWaterLogs.reduce((sum, item) => sum + (item.water_amount_ml || 250), 0)
-  const todayCheckins = somaticLogs.filter(s => s.type === 'body_scan' && isSameLocalDate(new Date(s.created_at), now) && s.author === currentUser)
+  // Render Login Screen if Not Signed In
+  if (!session) {
+    return (
+      <div className="max-w-md mx-auto min-h-screen bg-zinc-950 text-zinc-100 flex flex-col justify-center px-4">
+        <header className="text-center mb-6">
+          <h1 className="font-bold text-2xl tracking-tight text-white">MindFlow</h1>
+          <p className="text-xs text-zinc-400 mt-1">Daily hydration, awareness & mindful grounding</p>
+        </header>
+        <Auth />
+      </div>
+    )
+  }
 
-  // Filter Timeline Logs
+  const now = new Date()
+  const isMine = (item: any) => (item.user_id ? item.user_id === currentUserId : item.author === userDisplayName)
+
+  const todayLogs = logs.filter(l => isSameLocalDate(new Date(l.created_at), now) && isMine(l))
+  const todayWaterLogs = somaticLogs.filter(s => s.type === 'water' && isSameLocalDate(new Date(s.created_at), now) && isMine(s))
+  const todayWaterTotal = todayWaterLogs.reduce((sum, item) => sum + (item.water_amount_ml || 250), 0)
+  const todayCheckins = somaticLogs.filter(s => s.type === 'body_scan' && isSameLocalDate(new Date(s.created_at), now) && isMine(s))
+
   const displayedFeedLogs = logs.filter(l => {
-    if (feedFilter === 'mine') return l.author === currentUser
+    if (feedFilter === 'mine') return isMine(l)
     return true
   })
 
-  // Past 7 Days Table for Current Profile
+  // Past 7 Days Table for Current User
   const past7Days = Array.from({ length: 7 }).map((_, i) => {
     const targetDate = new Date()
     targetDate.setDate(targetDate.getDate() - i)
 
     const dayWater = somaticLogs
-      .filter(s => s.type === 'water' && isSameLocalDate(new Date(s.created_at), targetDate) && s.author === currentUser)
+      .filter(s => s.type === 'water' && isSameLocalDate(new Date(s.created_at), targetDate) && isMine(s))
       .reduce((sum, item) => sum + (item.water_amount_ml || 250), 0)
 
     const dayScans = somaticLogs
-      .filter(s => s.type === 'body_scan' && isSameLocalDate(new Date(s.created_at), targetDate) && s.author === currentUser).length
+      .filter(s => s.type === 'body_scan' && isSameLocalDate(new Date(s.created_at), targetDate) && isMine(s)).length
 
     return {
       dateLabel: targetDate.toLocaleDateString('en-US', { weekday: 'short', month: 'numeric', day: 'numeric' }),
@@ -349,7 +399,7 @@ export default function App() {
         <div className="flex justify-between items-center">
           <div>
             <h1 className="font-semibold text-base tracking-tight text-white">MindFlow</h1>
-            <p className="text-[11px] text-zinc-400">Daily wellness & reflection</p>
+            <p className="text-[11px] text-zinc-400">User: <span className="text-emerald-400 font-medium">{userDisplayName}</span></p>
           </div>
 
           <div className="flex items-center gap-1.5">
@@ -360,66 +410,20 @@ export default function App() {
             >
               <Moon size={18} />
             </button>
-            <button onClick={fetchLogs} className="p-2 text-zinc-400 hover:text-white">
+            <button onClick={fetchLogs} className="p-2 text-zinc-400 hover:text-white" title="Refresh">
               <RefreshCw size={18} />
+            </button>
+            <button onClick={handleSignOut} className="p-2 text-zinc-400 hover:text-red-400" title="Sign Out">
+              <LogOut size={18} />
             </button>
           </div>
         </div>
-
-        {/* Dynamic Profile Selector Strip */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none text-xs">
-          <span className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider mr-1">User:</span>
-          {profiles.map(name => (
-            <button
-              key={name}
-              onClick={() => handleSelectUser(name)}
-              className={`px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${
-                currentUser === name
-                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                  : 'bg-zinc-900 text-zinc-400 border border-zinc-800 hover:text-zinc-200'
-              }`}
-            >
-              {name}
-            </button>
-          ))}
-          <button
-            onClick={() => setIsAddingProfile(true)}
-            className="p-1 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white"
-            title="Add Person"
-          >
-            <Plus size={14} />
-          </button>
-        </div>
-
-        {/* Modal/Input to Add New Profile */}
-        {isAddingProfile && (
-          <form onSubmit={handleAddProfile} className="flex gap-2 pt-1">
-            <input
-              type="text"
-              placeholder="Enter name..."
-              value={newProfileName}
-              onChange={e => setNewProfileName(e.target.value)}
-              className="flex-1 bg-zinc-950 border border-zinc-700 rounded-lg px-2.5 py-1 text-xs text-white focus:outline-none focus:border-emerald-500"
-              autoFocus
-            />
-            <button type="submit" className="px-3 py-1 bg-emerald-500 text-zinc-950 font-semibold rounded-lg text-xs">
-              Add
-            </button>
-            <button 
-              type="button" 
-              onClick={() => setIsAddingProfile(false)}
-              className="px-2 py-1 text-zinc-400 text-xs hover:text-white"
-            >
-              Cancel
-            </button>
-          </form>
-        )}
       </header>
 
       {/* Main Container */}
       <main className="flex-1 p-4 overflow-y-auto">
         
-        {/* TAB 1: FEED / TIMELINE */}
+        {/* TAB 1: FEED / TIMELINE WITH DATE & TIME */}
         {activeTab === 'feed' && (
           <div className="space-y-4">
             <div className="flex items-center justify-between pb-1">
@@ -429,13 +433,13 @@ export default function App() {
                   onClick={() => setFeedFilter('all')}
                   className={`px-2 py-0.5 rounded ${feedFilter === 'all' ? 'bg-zinc-800 text-white font-medium' : 'text-zinc-400'}`}
                 >
-                  Family Feed
+                  All Logs
                 </button>
                 <button 
                   onClick={() => setFeedFilter('mine')}
                   className={`px-2 py-0.5 rounded ${feedFilter === 'mine' ? 'bg-zinc-800 text-white font-medium' : 'text-zinc-400'}`}
                 >
-                  {currentUser}'s Only
+                  My Logs
                 </button>
               </div>
             </div>
@@ -466,11 +470,11 @@ export default function App() {
                         }`}>
                           {log.category}
                         </span>
-                        <span className="text-xs text-zinc-500">
-                          {new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        <span className="text-[11px] text-zinc-400 font-medium">
+                          {formatDateTime(log.created_at)}
                         </span>
                       </div>
-                      <span className="text-[11px] text-zinc-400 font-medium">by {log.author || 'Onenness'}</span>
+                      <span className="text-[11px] text-zinc-400 font-medium">by {log.author || 'User'}</span>
                     </div>
                     <h3 className="font-medium text-zinc-100 text-sm leading-snug">{log.title}</h3>
                     {log.notes && <p className="text-xs text-zinc-400 mt-1 leading-relaxed">{log.notes}</p>}
@@ -481,7 +485,7 @@ export default function App() {
           </div>
         )}
 
-        {/* TAB 2: CAPTURE (CAMERA OR GALLERY) */}
+        {/* TAB 2: CAPTURE */}
         {activeTab === 'capture' && (
           <form onSubmit={handleSaveEntry} className="space-y-4">
             <div className="grid grid-cols-4 gap-2">
@@ -522,10 +526,8 @@ export default function App() {
               />
             </div>
 
-            {/* Photo Selection */}
             <div>
               <label className="block text-xs font-medium text-zinc-400 mb-1">Add Photo</label>
-              
               <input 
                 ref={cameraInputRef}
                 type="file" 
@@ -591,12 +593,12 @@ export default function App() {
               disabled={loading}
               className="w-full py-3 bg-emerald-500 hover:bg-emerald-600 text-zinc-950 font-semibold rounded-xl text-sm transition-colors"
             >
-              {loading ? 'Uploading & Saving...' : `Save Entry as ${currentUser}`}
+              {loading ? 'Uploading & Saving...' : 'Save Entry'}
             </button>
           </form>
         )}
 
-        {/* TAB 3: WATER & SOMATIC */}
+        {/* TAB 3: WATER & SOMATIC WITH FUNCTIONAL QUIET HOURS */}
         {activeTab === 'somatic' && (
           <div className="space-y-5">
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
@@ -606,7 +608,7 @@ export default function App() {
                     <Droplet size={20} />
                   </div>
                   <div>
-                    <h3 className="font-medium text-sm text-white">{currentUser}'s Hydration</h3>
+                    <h3 className="font-medium text-sm text-white">Daily Hydration Tracker</h3>
                     <p className="text-xs text-zinc-400">Today's Intake: <strong className="text-blue-400">{todayWaterTotal} ml</strong></p>
                   </div>
                 </div>
@@ -654,72 +656,66 @@ export default function App() {
               </div>
             </div>
 
-            {/* Work & Desk Stretch Reminders */}
-            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
-              <div className="flex items-center justify-between mb-3">
+            {/* Reminders: Periodic Hydration & Posture Reset */}
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-3">
+              <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <div className="p-2 bg-emerald-500/10 text-emerald-400 rounded-xl">
                     <Clock size={18} />
                   </div>
                   <div>
-                    <h3 className="font-medium text-sm text-white">Stand Up & Desk Reminders</h3>
-                    <p className="text-xs text-zinc-400">Hourly alerts to leave chair & stretch</p>
+                    <h3 className="font-medium text-sm text-white">Daytime Mindful Reminders</h3>
+                    <p className="text-xs text-zinc-400">Drink water & stand up alerts</p>
                   </div>
                 </div>
                 <input 
                   type="checkbox" 
-                  checked={workHoursEnabled} 
-                  onChange={e => setWorkHoursEnabled(e.target.checked)}
+                  checked={reminderEnabled} 
+                  onChange={e => setReminderEnabled(e.target.checked)}
                   className="w-4 h-4 accent-emerald-500" 
                 />
               </div>
-              {workHoursEnabled && (
-                <div className="flex items-center gap-3 text-xs text-zinc-300">
-                  <div className="flex-1">
-                    <span className="block text-zinc-500 mb-1">Work Start:</span>
-                    <input 
-                      type="time" 
-                      value={workStart} 
-                      onChange={e => setWorkStart(e.target.value)} 
-                      className="w-full bg-zinc-800 rounded-lg p-2 text-white border border-zinc-700" 
-                    />
-                  </div>
-                  <div className="flex-1">
-                    <span className="block text-zinc-500 mb-1">Work End:</span>
-                    <input 
-                      type="time" 
-                      value={workEnd} 
-                      onChange={e => setWorkEnd(e.target.value)} 
-                      className="w-full bg-zinc-800 rounded-lg p-2 text-white border border-zinc-700" 
-                    />
-                  </div>
+
+              {reminderEnabled && (
+                <div>
+                  <span className="block text-zinc-400 text-xs mb-1">Interval Frequency:</span>
+                  <select 
+                    value={reminderFrequencyMin}
+                    onChange={e => setReminderFrequencyMin(Number(e.target.value))}
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-2 text-xs text-white"
+                  >
+                    <option value={30}>Every 30 minutes</option>
+                    <option value={45}>Every 45 minutes</option>
+                    <option value={60}>Every 60 minutes</option>
+                  </select>
                 </div>
               )}
             </div>
 
-            {/* Quiet Hours */}
-            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
-              <div className="flex items-center justify-between mb-3">
+            {/* Functional Quiet Hours */}
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-3">
+              <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <div className="p-2 bg-amber-500/10 text-amber-400 rounded-xl">
                     <Moon size={18} />
                   </div>
                   <div>
                     <h3 className="font-medium text-sm text-white">Quiet Hours</h3>
-                    <p className="text-xs text-zinc-400">Silence all notifications at night</p>
+                    <p className="text-xs text-zinc-400">Silence daytime reminders completely</p>
                   </div>
                 </div>
                 <input 
                   type="checkbox" 
                   checked={quietHoursEnabled} 
                   onChange={e => setQuietHoursEnabled(e.target.checked)}
-                  className="w-4 h-4 accent-emerald-500" 
+                  className="w-4 h-4 accent-amber-500" 
                 />
               </div>
+
               {quietHoursEnabled && (
                 <div className="flex items-center gap-3 text-xs text-zinc-300">
                   <div className="flex-1">
-                    <span className="block text-zinc-500 mb-1">Quiet From:</span>
+                    <span className="block text-zinc-500 mb-1">Silence From:</span>
                     <input 
                       type="time" 
                       value={quietStart} 
@@ -728,7 +724,7 @@ export default function App() {
                     />
                   </div>
                   <div className="flex-1">
-                    <span className="block text-zinc-500 mb-1">Until:</span>
+                    <span className="block text-zinc-500 mb-1">Until Morning:</span>
                     <input 
                       type="time" 
                       value={quietEnd} 
@@ -742,9 +738,9 @@ export default function App() {
           </div>
         )}
 
-        {/* TAB 4: MEDITATE */}
+        {/* TAB 4: MEDITATE (WITH CALMING AUDIO MODES) */}
         {activeTab === 'meditate' && (
-          <div className="text-center py-10 space-y-6">
+          <div className="text-center py-6 space-y-6">
             <div className="w-36 h-36 mx-auto rounded-full border-2 border-emerald-500/30 flex items-center justify-center bg-emerald-500/5 shadow-lg">
               <span className="text-3xl font-light font-mono text-emerald-400">
                 {Math.floor(meditationSeconds / 60).toString().padStart(2, '0')}:
@@ -752,10 +748,49 @@ export default function App() {
               </span>
             </div>
 
+            {/* Audio & Guided Session Selector */}
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 text-left">
+              <span className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">
+                Meditation Atmosphere
+              </span>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { id: 'singing_bowl', label: 'Singing Bowl', icon: Bell },
+                  { id: 'calm_drone', label: '432Hz Drone', icon: Music },
+                  { id: 'guided_breath', label: 'Guided Breath', icon: Volume2 }
+                ].map(opt => {
+                  const Icon = opt.icon
+                  const active = meditationMode === opt.id
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      disabled={isMeditating}
+                      onClick={() => setMeditationMode(opt.id as any)}
+                      className={`p-2.5 rounded-xl border text-xs flex flex-col items-center gap-1.5 transition-colors ${
+                        active 
+                          ? 'bg-emerald-500/10 border-emerald-500 text-emerald-400' 
+                          : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200'
+                      } ${isMeditating ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                      <Icon size={16} />
+                      <span className="text-[11px] font-medium">{opt.label}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
             <div>
-              <h2 className="text-lg font-medium text-white">Tibetan Singing Bowl Anchor</h2>
+              <h2 className="text-base font-medium text-white">
+                {meditationMode === 'singing_bowl' && 'Tibetan Singing Bowl Anchor'}
+                {meditationMode === 'calm_drone' && 'Deep Grounding Drone (432Hz)'}
+                {meditationMode === 'guided_breath' && 'Short Guided Breathwork'}
+              </h2>
               <p className="text-xs text-zinc-400 mt-1 max-w-xs mx-auto leading-relaxed">
-                A subtle, harmonic singing bowl chimes every 2 minutes. When you hear it, gently bring awareness back to body & breath.
+                {meditationMode === 'singing_bowl' && 'Harmonic singing bowl chimes every 2 minutes to bring you back to awareness.'}
+                {meditationMode === 'calm_drone' && 'A smooth low-frequency ambient tone designed for deep presence.'}
+                {meditationMode === 'guided_breath' && 'Minimal vocal cues guiding your breath and posture release.'}
               </p>
             </div>
 
@@ -772,13 +807,13 @@ export default function App() {
           </div>
         )}
 
-        {/* TAB 5: NIGHTLY SUMMARY & REFLECTION */}
+        {/* TAB 5: SUMMARY & REFLECTION */}
         {activeTab === 'summary' && (
           <div className="space-y-4">
             <div className="bg-gradient-to-br from-indigo-950/40 to-purple-950/20 border border-indigo-900/40 rounded-2xl p-5">
               <div className="flex items-center gap-2 mb-2">
                 <BookOpen className="text-indigo-400" size={20} />
-                <h2 className="font-medium text-sm text-white">{currentUser}'s Daily Reflection</h2>
+                <h2 className="font-medium text-sm text-white">{userDisplayName}'s Daily Reflection</h2>
               </div>
               <p className="text-xs text-zinc-400">
                 Summary for {now.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
@@ -803,7 +838,7 @@ export default function App() {
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
               <div className="flex items-center gap-2 mb-3">
                 <Calendar size={16} className="text-emerald-400" />
-                <h3 className="text-xs font-semibold text-zinc-200 uppercase tracking-wider">{currentUser}'s Past 7 Days</h3>
+                <h3 className="text-xs font-semibold text-zinc-200 uppercase tracking-wider">{userDisplayName}'s Past 7 Days</h3>
               </div>
               <div className="space-y-2">
                 {past7Days.map((day, idx) => (
@@ -827,6 +862,7 @@ export default function App() {
                   <div key={l.id} className="border-l-2 border-emerald-500 pl-3 py-1">
                     <p className="text-xs font-medium text-zinc-200">{l.title}</p>
                     {l.notes && <p className="text-xs text-zinc-400 mt-0.5">{l.notes}</p>}
+                    <span className="text-[10px] text-zinc-500 block mt-1">{formatDateTime(l.created_at)}</span>
                   </div>
                 ))
               )}
