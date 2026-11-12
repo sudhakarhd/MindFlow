@@ -5,12 +5,13 @@ import { playPourSound } from './utils/audio'
 import { 
   Camera, Image as ImageIcon, Utensils, Footprints, MapPin, Sparkles, 
   Droplet, Bell, Play, Square, RefreshCw, Moon, BookOpen, Clock, Calendar,
-  Activity, LogOut, Music, Volume2, Heart, MessageSquare, Menu, X, Receipt
+  Activity, LogOut, Music, Volume2, Heart, MessageSquare, Menu, X, Receipt, Edit3, Check
 } from 'lucide-react'
 
 export default function App() {
   const [session, setSession] = useState<any>(null)
   const [userProfile, setUserProfile] = useState<any>(null)
+  const [allProfiles, setAllProfiles] = useState<any[]>([])
   const [currentView, setCurrentView] = useState<'wellness' | 'grocery'>('wellness')
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
   const [activeTab, setActiveTab] = useState<'feed' | 'capture' | 'somatic' | 'meditate' | 'summary'>('feed')
@@ -36,11 +37,22 @@ export default function App() {
 
   // Grocery & Budget State
   const [groceryBills, setGroceryBills] = useState<any[]>([])
-  const [receiptFile, setReceiptFile] = useState<File | null>(null)
-  const [receiptPreview, setReceiptPreview] = useState<string | null>(null)
   const [parsingReceipt, setParsingReceipt] = useState(false)
-  const [parsedReceiptData, setParsedReceiptData] = useState<any>(null)
-  const [sharedWithEmails, setSharedWithEmails] = useState('')
+  const [groceryMode, setGroceryMode] = useState<'list' | 'manual' | 'share'>('list')
+  const [editingBillId, setEditingBillId] = useState<string | null>(null)
+  const [editBillData, setEditBillData] = useState<any>(null)
+  const [globalSharedEmails, setGlobalSharedEmails] = useState<string[]>([])
+  const [newShareEmailInput, setNewShareEmailInput] = useState('')
+
+  // Manual Bill Form State
+  const [manualStore, setManualStore] = useState('')
+  const [manualDate, setManualDate] = useState(new Date().toISOString().split('T')[0])
+  const [manualTotal, setManualTotal] = useState('')
+  const [manualItemsText, setManualItemsText] = useState('')
+  const [manualCategory, setManualCategory] = useState<'Produce' | 'Dairy' | 'Meat' | 'Pantry' | 'Household'>('Pantry')
+
+  receiptCameraRef: useRef<HTMLInputElement | null>(null)
+  receiptGalleryRef: useRef<HTMLInputElement | null>(null)
   const receiptCameraRef = useRef<HTMLInputElement>(null)
   const receiptGalleryRef = useRef<HTMLInputElement>(null)
 
@@ -72,11 +84,14 @@ export default function App() {
     return () => subscription.unsubscribe()
   }, [])
 
-  // Fetch User Profile
+  // Fetch User Profile & All Profiles for sharing
   useEffect(() => {
     if (session?.user?.id) {
       supabase.from('user_profiles').select('*').eq('id', session.user.id).single().then(({ data }) => {
         if (data) setUserProfile(data)
+      })
+      supabase.from('user_profiles').select('*').then(({ data }) => {
+        if (data) setAllProfiles(data)
       })
     }
   }, [session])
@@ -114,7 +129,17 @@ export default function App() {
 
   const fetchGroceryBills = async () => {
     const { data } = await supabase.from('grocery_bills').select('*').order('created_at', { ascending: false })
-    if (data) setGroceryBills(data)
+    if (data) {
+      setGroceryBills(data)
+      // Extract unique shared emails across bills
+      const allShared = new Set<string>()
+      data.forEach(b => {
+        if (Array.isArray(b.shared_with)) {
+          b.shared_with.forEach((email: string) => allShared.add(email))
+        }
+      })
+      setGlobalSharedEmails(Array.from(allShared))
+    }
   }
 
   const handleSignOut = async () => {
@@ -151,41 +176,59 @@ export default function App() {
     }
   }
 
-  // 512 Hz Tone Sine Oscillator
-  const start512HzTone = () => {
+  // Soothing 128 Hz Harmonic Sub-Octave with 256 Hz Overtone & Lowpass Filter
+  const startSoothingTone = () => {
     try {
       const ctx = audioContextRef.current || new (window.AudioContext || (window as any).webkitAudioContext)()
       audioContextRef.current = ctx
 
-      const osc = ctx.createOscillator()
-      const gain = ctx.createGain()
+      const filter = ctx.createBiquadFilter()
+      filter.type = 'lowpass'
+      filter.frequency.setValueAtTime(240, ctx.currentTime)
 
-      osc.type = 'sine'
-      osc.frequency.setValueAtTime(512, ctx.currentTime)
-      gain.gain.setValueAtTime(0.001, ctx.currentTime)
-      gain.gain.linearRampToValueAtTime(0.12, ctx.currentTime + 1.5)
+      const masterGain = ctx.createGain()
+      masterGain.gain.setValueAtTime(0.001, ctx.currentTime)
+      masterGain.gain.linearRampToValueAtTime(0.08, ctx.currentTime + 3.0) // 3-second slow fade-in
 
-      osc.connect(gain)
-      gain.connect(ctx.destination)
-      osc.start()
+      // 128Hz Sub-octave (512 / 4)
+      const osc1 = ctx.createOscillator()
+      osc1.type = 'sine'
+      osc1.frequency.setValueAtTime(128, ctx.currentTime)
 
-      droneOscillatorRef.current = osc
-      droneGainRef.current = gain
+      // 256Hz Subtle Overtone (512 / 2)
+      const osc2 = ctx.createOscillator()
+      osc2.type = 'sine'
+      osc2.frequency.setValueAtTime(256, ctx.currentTime)
+      const gain2 = ctx.createGain()
+      gain2.gain.setValueAtTime(0.35, ctx.currentTime)
+
+      osc1.connect(masterGain)
+      osc2.connect(gain2)
+      gain2.connect(masterGain)
+
+      masterGain.connect(filter)
+      filter.connect(ctx.destination)
+
+      osc1.start()
+      osc2.start()
+
+      droneOscillatorRef.current = osc1
+      droneGainRef.current = masterGain
     } catch (e) {
-      console.error('512Hz tone error:', e)
+      console.error('Soothing tone error:', e)
     }
   }
 
   const stopToneOrDrone = () => {
     try {
       if (droneGainRef.current && audioContextRef.current) {
-        droneGainRef.current.gain.linearRampToValueAtTime(0.001, audioContextRef.current.currentTime + 1.0)
+        droneGainRef.current.gain.linearRampToValueAtTime(0.001, audioContextRef.current.currentTime + 1.5)
         setTimeout(() => {
           droneOscillatorRef.current?.stop()
           droneOscillatorRef.current?.disconnect()
           droneOscillatorRef.current = null
           droneGainRef.current = null
-        }, 1000)
+        }, 1500)
       }
     } catch (e) {
       console.error(e)
@@ -295,7 +338,7 @@ export default function App() {
     let timer: any
     if (isMeditating) {
       if (meditationMode === 'singing_bowl') playTibetanSingingBowl()
-      if (meditationMode === 'tone_512') start512HzTone()
+      if (meditationMode === 'tone_512') startSoothingTone()
       if (meditationMode === 'guided_breath') {
         playTibetanSingingBowl()
         speakGuidance("Breathe in from the nose... and breathe out through the mouth... and hold for 2 seconds... and inhale")
@@ -394,27 +437,45 @@ export default function App() {
     setLoading(false)
   }
 
+  // Robust Likes & Comments with Error Alerting & Immediate Refresh
   const toggleLike = async (logId: string) => {
-    const existing = likes.find(l => l.log_id === logId && l.user_id === currentUserId)
-    if (existing) {
-      await supabase.from('log_likes').delete().eq('id', existing.id)
-    } else {
-      await supabase.from('log_likes').insert([{ log_id: logId, user_id: currentUserId, author: userDisplayName }])
+    try {
+      const existing = likes.find(l => l.log_id === logId && l.user_id === currentUserId)
+      if (existing) {
+        const { error } = await supabase.from('log_likes').delete().eq('id', existing.id)
+        if (error) throw error
+      } else {
+        const { error } = await supabase.from('log_likes').insert([{ 
+          log_id: logId, 
+          user_id: currentUserId, 
+          author: userDisplayName 
+        }])
+        if (error) throw error
+      }
+      await fetchLogs()
+    } catch (err: any) {
+      console.error('Like error:', err)
+      alert('Failed to update like: ' + (err.message || err))
     }
-    await fetchLogs()
   }
 
   const handleAddComment = async (logId: string) => {
     const content = commentInputs[logId]?.trim()
     if (!content) return
-    await supabase.from('log_comments').insert([{
-      log_id: logId,
-      user_id: currentUserId,
-      author: userDisplayName,
-      content
-    }])
-    setCommentInputs({ ...commentInputs, [logId]: '' })
-    await fetchLogs()
+    try {
+      const { error } = await supabase.from('log_comments').insert([{
+        log_id: logId,
+        user_id: currentUserId,
+        author: userDisplayName,
+        content
+      }])
+      if (error) throw error
+      setCommentInputs({ ...commentInputs, [logId]: '' })
+      await fetchLogs()
+    } catch (err: any) {
+      console.error('Comment error:', err)
+      alert('Failed to post comment: ' + (err.message || err))
+    }
   }
 
   const logSomaticCheckin = async (sensation: string) => {
@@ -447,25 +508,22 @@ export default function App() {
     await fetchLogs()
   }
 
-  // Grocery Scanner & Receipt AI Parsing
-  const handleReceiptFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Auto-Read Receipt, Edit & Manual Bill Entry
+  const handleReceiptFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const selected = e.target.files[0]
-      setReceiptFile(selected)
-      setReceiptPreview(URL.createObjectURL(selected))
+      await processReceiptImageFile(selected)
     }
   }
 
-  const processReceiptWithAI = async () => {
-    if (!receiptFile) return
+  const processReceiptImageFile = async (fileToUpload: File) => {
     setParsingReceipt(true)
-
     try {
-      const fileExt = receiptFile.name.split('.').pop() || 'jpg'
+      const fileExt = fileToUpload.name.split('.').pop() || 'jpg'
       const fileName = `receipt-${Date.now()}.${fileExt}`
       const { error: uploadErr } = await supabase.storage
         .from('wellness-media')
-        .upload(fileName, receiptFile, { contentType: receiptFile.type || 'image/jpeg', upsert: true })
+        .upload(fileName, fileToUpload, { contentType: fileToUpload.type || 'image/jpeg', upsert: true })
 
       if (uploadErr) throw uploadErr
 
@@ -488,17 +546,33 @@ export default function App() {
           cleanText = cleanText.replace(/^```/, '').replace(/```$/, '').trim()
         }
         parsed = JSON.parse(cleanText)
-      } catch (e) {
+      } catch (err) {
         console.error('Failed to parse JSON from AI:', jsonRes.response)
         parsed = {
-          store_name: 'Grocery Store',
+          store_name: 'Supermarket',
           receipt_date: new Date().toISOString().split('T')[0],
           total_amount: 0,
           items: [{ name: 'Scanned Items', price: 0, category: 'Pantry' }]
         }
       }
 
-      setParsedReceiptData({ ...parsed, image_url: publicUrl })
+      // Automatically save to grocery_bills
+      const billObj = {
+        user_id: currentUserId,
+        store_name: (parsed as any).store_name || 'Grocery Store',
+        receipt_date: (parsed as any).receipt_date || new Date().toISOString().split('T')[0],
+        total_amount: (parsed as any).total_amount || 0,
+        items: (parsed as any).items || [],
+        shared_with: globalSharedEmails,
+        image_url: publicUrl
+      }
+
+      const { error: saveErr } = await supabase.from('grocery_bills').insert([billObj])
+      if (saveErr) throw saveErr
+
+      alert('Receipt automatically scanned and saved to grocery bills!')
+      await fetchGroceryBills()
+      setGroceryMode('list')
     } catch (err: any) {
       alert('Error parsing receipt: ' + (err.message || err))
     } finally {
@@ -506,27 +580,77 @@ export default function App() {
     }
   }
 
-  const saveGroceryBill = async () => {
-    if (!parsedReceiptData) return
+  const saveManualBill = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!manualStore || !manualTotal) return
+
     try {
-      const sharedList = sharedWithEmails ? sharedWithEmails.split(',').map(e => e.trim()).filter(Boolean) : []
-      await supabase.from('grocery_bills').insert([{
+      const itemsList = manualItemsText ? manualItemsText.split('\n').map(line => {
+        const [name, price] = line.split(':').map(s => s.trim())
+        return {
+          name: name || 'Item',
+          price: parseFloat(price) || 0,
+          category: manualCategory
+        }
+      }) : [{ name: 'Manual Expense', price: parseFloat(manualTotal) || 0, category: manualCategory }]
+
+      const { error } = await supabase.from('grocery_bills').insert([{
         user_id: currentUserId,
-        store_name: parsedReceiptData.store_name || 'Grocery Store',
-        receipt_date: parsedReceiptData.receipt_date || new Date().toISOString().split('T')[0],
-        total_amount: parsedReceiptData.total_amount || 0,
-        items: parsedReceiptData.items || [],
-        shared_with: sharedList,
-        image_url: parsedReceiptData.image_url || null
+        store_name: manualStore,
+        receipt_date: manualDate,
+        total_amount: parseFloat(manualTotal) || 0,
+        items: itemsList,
+        shared_with: globalSharedEmails,
+        image_url: null
       }])
-      alert('Grocery bill saved successfully!')
-      setParsedReceiptData(null)
-      setReceiptFile(null)
-      setReceiptPreview(null)
-      setSharedWithEmails('')
+
+      if (error) throw error
+
+      alert('Manual bill saved successfully!')
+      setManualStore('')
+      setManualTotal('')
+      setManualItemsText('')
+      setGroceryMode('list')
       await fetchGroceryBills()
     } catch (err: any) {
-      alert('Error saving bill: ' + err.message)
+      alert('Error saving manual bill: ' + err.message)
+    }
+  }
+
+  const updateExistingBill = async (billId: string) => {
+    try {
+      const { error } = await supabase.from('grocery_bills').update({
+        store_name: editBillData.store_name,
+        receipt_date: editBillData.receipt_date,
+        total_amount: editBillData.total_amount,
+        items: editBillData.items,
+        shared_with: editBillData.shared_with
+      }).eq('id', billId)
+
+      if (error) throw error
+
+      alert('Grocery bill updated successfully!')
+      setEditingBillId(null)
+      setEditBillData(null)
+      await fetchGroceryBills()
+    } catch (err: any) {
+      alert('Error updating bill: ' + err.message)
+    }
+  }
+
+  const toggleShareEmail = (email: string) => {
+    if (globalSharedEmails.includes(email)) {
+      setGlobalSharedEmails(globalSharedEmails.filter(e => e !== email))
+    } else {
+      setGlobalSharedEmails([...globalSharedEmails, email])
+    }
+  }
+
+  const addCustomShareEmail = () => {
+    const trimmed = newShareEmailInput.trim()
+    if (trimmed && !globalSharedEmails.includes(trimmed)) {
+      setGlobalSharedEmails([...globalSharedEmails, trimmed])
+      setNewShareEmailInput('')
     }
   }
 
@@ -1089,7 +1213,7 @@ export default function App() {
               </div>
             )}
 
-            {/* TAB 4: MEDITATE (WITH 512 HZ TONE & GUIDED BREATH) */}
+            {/* TAB 4: MEDITATE (WITH SOOTHING 128Hz/256Hz TONE) */}
             {activeTab === 'meditate' && (
               <div className="text-center py-6 space-y-6">
                 <div className="w-36 h-36 mx-auto rounded-full border-2 border-emerald-500/30 flex items-center justify-center bg-emerald-500/5 shadow-lg">
@@ -1107,7 +1231,7 @@ export default function App() {
                   <div className="grid grid-cols-3 gap-2">
                     {[
                       { id: 'singing_bowl', label: 'Singing Bowl', icon: Bell },
-                      { id: 'tone_512', label: '512 Hz Tone', icon: Music },
+                      { id: 'tone_512', label: 'Soothing Tone', icon: Music },
                       { id: 'guided_breath', label: 'Guided Breath', icon: Volume2 }
                     ].map(opt => {
                       const Icon = opt.icon
@@ -1135,12 +1259,12 @@ export default function App() {
                 <div>
                   <h2 className="text-base font-medium text-white">
                     {meditationMode === 'singing_bowl' && 'Tibetan Singing Bowl Anchor'}
-                    {meditationMode === 'tone_512' && '512 Hz Grounding Sine Tone'}
+                    {meditationMode === 'tone_512' && 'Soothing Sub-Octave Warm Tone (128Hz + 256Hz)'}
                     {meditationMode === 'guided_breath' && 'Soft Guided Breathwork'}
                   </h2>
                   <p className="text-xs text-zinc-400 mt-1 max-w-xs mx-auto leading-relaxed">
                     {meditationMode === 'singing_bowl' && 'Harmonic singing bowl chimes every 2 minutes to bring you back to awareness.'}
-                    {meditationMode === 'tone_512' && 'A clean 512Hz sine oscillator tone designed for mental focus and calm.'}
+                    {meditationMode === 'tone_512' && 'Mellow 128Hz sub-octave and 256Hz overtone filtered through a gentle lowpass filter.'}
                     {meditationMode === 'guided_breath' && 'Soft female voice guiding your nose breathing, hold, and release.'}
                   </p>
                 </div>
@@ -1226,170 +1350,306 @@ export default function App() {
         {/* VIEW 2: GROCERY & BUDGET */}
         {currentView === 'grocery' && (
           <div className="space-y-5">
-            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
-              <div>
-                <h2 className="font-semibold text-sm text-white flex items-center gap-2">
-                  <Receipt size={18} className="text-emerald-400" /> AI Grocery Receipt Scanner
-                </h2>
-                <p className="text-xs text-zinc-400 mt-0.5">Upload a receipt to parse items, store name & budget categories</p>
-              </div>
-
-              <input 
-                ref={receiptCameraRef}
-                type="file" 
-                accept="image/*" 
-                capture="environment" 
-                onChange={handleReceiptFile}
-                className="hidden" 
-              />
-              <input 
-                ref={receiptGalleryRef}
-                type="file" 
-                accept="image/*" 
-                onChange={handleReceiptFile}
-                className="hidden" 
-              />
-
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => receiptCameraRef.current?.click()}
-                  className="py-2.5 px-3 bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 rounded-xl text-xs flex items-center justify-center gap-2 text-zinc-300"
-                >
-                  <Camera size={16} className="text-emerald-400" />
-                  Capture Receipt
-                </button>
-                <button
-                  type="button"
-                  onClick={() => receiptGalleryRef.current?.click()}
-                  className="py-2.5 px-3 bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 rounded-xl text-xs flex items-center justify-center gap-2 text-zinc-300"
-                >
-                  <ImageIcon size={16} className="text-blue-400" />
-                  Select Image
-                </button>
-              </div>
-
-              {receiptPreview && (
-                <div className="space-y-3">
-                  <img src={receiptPreview} alt="Receipt Preview" className="w-full h-48 object-cover rounded-xl border border-zinc-800" />
-                  <button
-                    type="button"
-                    disabled={parsingReceipt}
-                    onClick={processReceiptWithAI}
-                    className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 font-semibold text-white rounded-xl text-xs transition-colors"
-                  >
-                    {parsingReceipt ? 'Analyzing Receipt with Gemini Vision...' : 'Scan & Extract with AI'}
-                  </button>
-                </div>
-              )}
+            {/* Mode Sub-navigation: List vs Manual vs Share */}
+            <div className="flex bg-zinc-900 p-1 rounded-xl border border-zinc-800 text-xs font-medium">
+              <button
+                onClick={() => setGroceryMode('list')}
+                className={`flex-1 py-2 rounded-lg transition-colors ${groceryMode === 'list' ? 'bg-zinc-800 text-white' : 'text-zinc-400'}`}
+              >
+                Bills & Spend ({groceryBills.length})
+              </button>
+              <button
+                onClick={() => setGroceryMode('manual')}
+                className={`flex-1 py-2 rounded-lg transition-colors ${groceryMode === 'manual' ? 'bg-zinc-800 text-white' : 'text-zinc-400'}`}
+              >
+                + Manual Bill
+              </button>
+              <button
+                onClick={() => setGroceryMode('share')}
+                className={`flex-1 py-2 rounded-lg transition-colors ${groceryMode === 'share' ? 'bg-zinc-800 text-white' : 'text-zinc-400'}`}
+              >
+                Share Settings
+              </button>
             </div>
 
-            {/* Parsed Receipt Review Modal / Box */}
-            {parsedReceiptData && (
-              <div className="bg-zinc-900 border border-emerald-500/40 rounded-2xl p-5 space-y-4">
-                <div className="flex justify-between items-center border-b border-zinc-800 pb-2">
-                  <h3 className="font-semibold text-sm text-emerald-400">Review Parsed Bill</h3>
-                  <span className="text-xs text-zinc-400">{parsedReceiptData.receipt_date}</span>
+            {/* MODE 1: BILLS LIST & RECEIPT SCANNER */}
+            {groceryMode === 'list' && (
+              <div className="space-y-4">
+                <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-3">
+                  <h2 className="font-semibold text-sm text-white flex items-center gap-2">
+                    <Receipt size={18} className="text-emerald-400" /> Auto-Scan Receipt
+                  </h2>
+                  <p className="text-xs text-zinc-400">Select or snap a photo. AI will instantly parse and save your bill.</p>
+
+                  <input ref={receiptCameraRef} type="file" accept="image/*" capture="environment" onChange={handleReceiptFile} className="hidden" />
+                  <input ref={receiptGalleryRef} type="file" accept="image/*" onChange={handleReceiptFile} className="hidden" />
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      disabled={parsingReceipt}
+                      onClick={() => receiptCameraRef.current?.click()}
+                      className="py-2.5 px-3 bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 rounded-xl text-xs flex items-center justify-center gap-2 text-zinc-300"
+                    >
+                      <Camera size={16} className="text-emerald-400" />
+                      Snap Receipt
+                    </button>
+                    <button
+                      type="button"
+                      disabled={parsingReceipt}
+                      onClick={() => receiptGalleryRef.current?.click()}
+                      className="py-2.5 px-3 bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 rounded-xl text-xs flex items-center justify-center gap-2 text-zinc-300"
+                    >
+                      <ImageIcon size={16} className="text-blue-400" />
+                      Upload Photo
+                    </button>
+                  </div>
+
+                  {parsingReceipt && (
+                    <div className="text-center py-4 text-xs text-indigo-400 animate-pulse font-medium">
+                      🤖 Gemini Vision is analyzing receipt & auto-saving...
+                    </div>
+                  )}
                 </div>
 
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div>
-                    <span className="text-zinc-500 block">Store:</span>
-                    <input 
-                      type="text" 
-                      value={parsedReceiptData.store_name || ''} 
-                      onChange={e => setParsedReceiptData({ ...parsedReceiptData, store_name: e.target.value })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-1.5 text-white mt-1"
-                    />
-                  </div>
-                  <div>
-                    <span className="text-zinc-500 block">Total ($):</span>
-                    <input 
-                      type="number" 
-                      step="0.01"
-                      value={parsedReceiptData.total_amount || 0} 
-                      onChange={e => setParsedReceiptData({ ...parsedReceiptData, total_amount: parseFloat(e.target.value) || 0 })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-1.5 text-white mt-1"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <span className="text-xs font-semibold text-zinc-300 block mb-2">Itemized Categories:</span>
-                  <div className="space-y-2 max-h-48 overflow-y-auto">
-                    {parsedReceiptData.items?.map((item: any, idx: number) => (
-                      <div key={idx} className="bg-zinc-950 p-2.5 rounded-xl border border-zinc-800 flex items-center justify-between gap-2 text-xs">
-                        <span className="text-zinc-200 font-medium flex-1">{item.name}</span>
-                        <span className="text-emerald-400 font-mono">${Number(item.price || 0).toFixed(2)}</span>
-                        <span className="px-2 py-0.5 bg-zinc-800 text-zinc-300 rounded text-[10px]">{item.category}</span>
+                {/* Category Spend Breakdown */}
+                <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-3">
+                  <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider">Category Spend Breakdown</h3>
+                  <div className="grid grid-cols-2 gap-2">
+                    {Object.entries(categoryTotals).map(([cat, total]) => (
+                      <div key={cat} className="bg-zinc-950 border border-zinc-800 p-3 rounded-xl flex justify-between items-center">
+                        <span className="text-xs text-zinc-400 font-medium">{cat}</span>
+                        <span className="text-xs font-bold text-emerald-400 font-mono">${total.toFixed(2)}</span>
                       </div>
                     ))}
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-medium text-zinc-400 mb-1">Share with family/friend emails (comma separated):</label>
-                  <input
-                    type="text"
-                    placeholder="friend@domain.com, partner@domain.com"
-                    value={sharedWithEmails}
-                    onChange={e => setSharedWithEmails(e.target.value)}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
-                  />
-                </div>
+                {/* Saved Bills List with Edit Option */}
+                <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-3">
+                  <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider">Saved Grocery Bills</h3>
+                  {groceryBills.length === 0 ? (
+                    <p className="text-xs text-zinc-500 italic">No grocery bills recorded yet.</p>
+                  ) : (
+                    groceryBills.map(bill => {
+                      const isEditing = editingBillId === bill.id
+                      return (
+                        <div key={bill.id} className="bg-zinc-950 border border-zinc-800 rounded-xl p-3.5 space-y-2">
+                          {!isEditing ? (
+                            <>
+                              <div className="flex justify-between items-center text-xs">
+                                <span className="font-semibold text-white text-sm">{bill.store_name}</span>
+                                <span className="text-emerald-400 font-bold font-mono text-sm">${Number(bill.total_amount).toFixed(2)}</span>
+                              </div>
+                              <div className="flex justify-between items-center text-[11px] text-zinc-400">
+                                <span>{bill.receipt_date}</span>
+                                <button
+                                  onClick={() => { setEditingBillId(bill.id); setEditBillData({ ...bill }); }}
+                                  className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1 font-medium"
+                                >
+                                  <Edit3 size={13} /> Edit Bill
+                                </button>
+                              </div>
+                              {bill.shared_with && bill.shared_with.length > 0 && (
+                                <div className="text-[10px] text-indigo-300 bg-indigo-950/40 px-2 py-0.5 rounded border border-indigo-900/40">
+                                  Shared with: {bill.shared_with.join(', ')}
+                                </div>
+                              )}
+                            </>
+                          ) : (
+                            <div className="space-y-3 pt-1">
+                              <div className="grid grid-cols-2 gap-2 text-xs">
+                                <div>
+                                  <label className="text-[10px] text-zinc-500 block">Store:</label>
+                                  <input
+                                    type="text"
+                                    value={editBillData.store_name || ''}
+                                    onChange={e => setEditBillData({ ...editBillData, store_name: e.target.value })}
+                                    className="w-full bg-zinc-900 border border-zinc-700 rounded p-1.5 text-white"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="text-[10px] text-zinc-500 block">Total ($):</label>
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    value={editBillData.total_amount || 0}
+                                    onChange={e => setEditBillData({ ...editBillData, total_amount: parseFloat(e.target.value) || 0 })}
+                                    className="w-full bg-zinc-900 border border-zinc-700 rounded p-1.5 text-white"
+                                  />
+                                </div>
+                              </div>
 
-                <div className="flex gap-2">
-                  <button
-                    onClick={saveGroceryBill}
-                    className="flex-1 py-2.5 bg-emerald-500 hover:bg-emerald-600 font-semibold text-zinc-950 rounded-xl text-xs"
-                  >
-                    Save to Grocery Bills
-                  </button>
-                  <button
-                    onClick={() => setParsedReceiptData(null)}
-                    className="px-4 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs"
-                  >
-                    Cancel
-                  </button>
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => updateExistingBill(bill.id)}
+                                  className="flex-1 py-1.5 bg-emerald-500 text-zinc-950 font-semibold rounded text-xs"
+                                >
+                                  Save Changes
+                                </button>
+                                <button
+                                  onClick={() => { setEditingBillId(null); setEditBillData(null); }}
+                                  className="px-3 py-1.5 bg-zinc-800 text-zinc-300 rounded text-xs"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })
+                  )}
                 </div>
               </div>
             )}
 
-            {/* Category Spend Breakdown */}
-            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-3">
-              <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider">Category Spend Breakdown</h3>
-              <div className="grid grid-cols-2 gap-2">
-                {Object.entries(categoryTotals).map(([cat, total]) => (
-                  <div key={cat} className="bg-zinc-950 border border-zinc-800 p-3 rounded-xl flex justify-between items-center">
-                    <span className="text-xs text-zinc-400 font-medium">{cat}</span>
-                    <span className="text-xs font-bold text-emerald-400 font-mono">${total.toFixed(2)}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
+            {/* MODE 2: MANUAL BILL ENTRY */}
+            {groceryMode === 'manual' && (
+              <form onSubmit={saveManualBill} className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
+                <h2 className="font-semibold text-sm text-white">Manual Grocery Bill Entry</h2>
 
-            {/* Recent Grocery Bills List */}
-            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-3">
-              <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider">Saved Grocery Bills ({groceryBills.length})</h3>
-              {groceryBills.length === 0 ? (
-                <p className="text-xs text-zinc-500 italic">No grocery bills recorded yet.</p>
-              ) : (
-                groceryBills.map(bill => (
-                  <div key={bill.id} className="bg-zinc-950 border border-zinc-800 rounded-xl p-3 space-y-1.5">
-                    <div className="flex justify-between items-center text-xs">
-                      <span className="font-semibold text-white">{bill.store_name}</span>
-                      <span className="text-emerald-400 font-bold font-mono">${Number(bill.total_amount).toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between items-center text-[11px] text-zinc-400">
-                      <span>{bill.receipt_date}</span>
-                      {bill.shared_with && bill.shared_with.length > 0 && (
-                        <span className="text-indigo-400">Shared with {bill.shared_with.length}</span>
-                      )}
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1">Store Name</label>
+                  <input
+                    type="text"
+                    placeholder="e.g., Trader Joe's, Costco"
+                    value={manualStore}
+                    onChange={e => setManualStore(e.target.value)}
+                    required
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-400 mb-1">Date</label>
+                    <input
+                      type="date"
+                      value={manualDate}
+                      onChange={e => setManualDate(e.target.value)}
+                      required
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-400 mb-1">Total Amount ($)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      placeholder="0.00"
+                      value={manualTotal}
+                      onChange={e => setManualTotal(e.target.value)}
+                      required
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1">Category</label>
+                  <select
+                    value={manualCategory}
+                    onChange={e => setManualCategory(e.target.value as any)}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                  >
+                    <option value="Produce">Produce</option>
+                    <option value="Dairy">Dairy</option>
+                    <option value="Meat">Meat</option>
+                    <option value="Pantry">Pantry</option>
+                    <option value="Household">Household</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1">Items (Format: Item Name: Price per line)</label>
+                  <textarea
+                    rows={3}
+                    placeholder="Organic Milk: 4.99&#10;Avocados: 3.50"
+                    value={manualItemsText}
+                    onChange={e => setManualItemsText(e.target.value)}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full py-3 bg-emerald-500 hover:bg-emerald-600 font-semibold text-zinc-950 rounded-xl text-xs transition-colors"
+                >
+                  Save Manual Bill
+                </button>
+              </form>
+            )}
+
+            {/* MODE 3: SHARE SETTINGS */}
+            {groceryMode === 'share' && (
+              <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
+                <div>
+                  <h2 className="font-semibold text-sm text-white flex items-center gap-2">
+                    <Receipt size={18} className="text-emerald-400" /> Share Budget & Bills
+                  </h2>
+                  <p className="text-xs text-zinc-400 mt-0.5">Select registered family/friends or add custom email addresses to share bills with.</p>
+                </div>
+
+                <div className="space-y-2">
+                  <span className="block text-xs font-semibold text-zinc-300 uppercase tracking-wider">Registered Users:</span>
+                  {allProfiles.length === 0 ? (
+                    <p className="text-xs text-zinc-500 italic">No other registered user profiles found.</p>
+                  ) : (
+                    allProfiles.map(prof => {
+                      const isShared = globalSharedEmails.includes(prof.email)
+                      return (
+                        <button
+                          key={prof.id}
+                          onClick={() => toggleShareEmail(prof.email)}
+                          className={`w-full flex justify-between items-center p-3 rounded-xl border text-xs transition-colors ${
+                            isShared 
+                              ? 'bg-emerald-500/10 border-emerald-500 text-emerald-300 font-medium' 
+                              : 'bg-zinc-950 border-zinc-800 text-zinc-300 hover:text-white'
+                          }`}
+                        >
+                          <span>{prof.display_name} ({prof.email})</span>
+                          {isShared && <Check size={16} className="text-emerald-400" />}
+                        </button>
+                      )
+                    })
+                  )}
+                </div>
+
+                <div className="space-y-2 pt-2 border-t border-zinc-800">
+                  <label className="block text-xs font-semibold text-zinc-300 uppercase tracking-wider">Add Custom Email:</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="email"
+                      placeholder="family@domain.com"
+                      value={newShareEmailInput}
+                      onChange={e => setNewShareEmailInput(e.target.value)}
+                      className="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={addCustomShareEmail}
+                      className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-zinc-950 font-semibold rounded-xl text-xs"
+                    >
+                      Add
+                    </button>
+                  </div>
+                </div>
+
+                {globalSharedEmails.length > 0 && (
+                  <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800 space-y-1.5">
+                    <span className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider">Currently Shared With ({globalSharedEmails.length}):</span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {globalSharedEmails.map(email => (
+                        <span key={email} className="px-2.5 py-1 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded-lg text-xs">
+                          {email}
+                        </span>
+                      ))}
                     </div>
                   </div>
-                ))
-              )}
-            </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </main>
