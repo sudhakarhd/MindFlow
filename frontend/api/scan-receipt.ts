@@ -23,35 +23,48 @@ export default async function handler(req: any, res: any) {
       return res.status(500).json({ error: 'GEMINI_API_KEY is not configured' });
     }
 
-    // Call Gemini API via native fetch
-    const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                {
-                  inline_data: {
-                    mime_type: 'image/jpeg',
-                    data: base64Data
-                  }
-                },
-                {
-                  text: 'Extract receipt details in strict JSON format with keys: store_name (string), receipt_date (YYYY-MM-DD string), total_amount (number), and items (array of objects with name, price, and category where category must be one of: Produce, Dairy, Meat, Pantry, Household). Return ONLY valid JSON.'
-                }
-              ]
-            }
-          ]
-        })
-      }
-    );
+    const models = ['gemini-3.8-flash', 'gemini-3.5-flash-lite', 'gemini-3.8-pro'];
+    let geminiRes: Response | null = null;
+    let lastErrorText = '';
 
-    if (!geminiRes.ok) {
-      const errText = await geminiRes.text();
-      return res.status(500).json({ error: `Gemini API error: ${errText}` });
+    for (const model of models) {
+      geminiRes = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [
+              {
+                parts: [
+                  {
+                    inline_data: {
+                      mime_type: 'image/jpeg',
+                      data: base64Data
+                    }
+                  },
+                  {
+                    text: 'Extract receipt details in strict JSON format with keys: store_name (string), receipt_date (YYYY-MM-DD string), total_amount (number), and items (array of objects with name, price, and category where category must be one of: Produce, Dairy, Meat, Pantry, Household). Return ONLY valid JSON.'
+                  }
+                ]
+              }
+            ]
+          })
+        }
+      );
+
+      if (geminiRes.ok) {
+        break;
+      }
+
+      lastErrorText = await geminiRes.text();
+      if (geminiRes.status !== 503 && geminiRes.status !== 429) {
+        break;
+      }
+    }
+
+    if (!geminiRes || !geminiRes.ok) {
+      return res.status(500).json({ error: `Gemini API error: ${lastErrorText}` });
     }
 
     const geminiJson = await geminiRes.json();
