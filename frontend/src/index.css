@@ -1,1 +1,16 @@
 @import "tailwindcss";
+
+@keyframes breathPulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 20px rgba(16, 185, 129, 0.15);
+  }
+  50% {
+    transform: scale(1.12);
+    box-shadow: 0 0 35px rgba(16, 185, 129, 0.35);
+  }
+}
+
+.animate-breath {
+  animation: breathPulse 8s ease-in-out infinite;
+}

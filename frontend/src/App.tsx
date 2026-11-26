@@ -179,7 +179,7 @@ export default function App() {
     }
   }
 
-  // Soothing 128 Hz Harmonic Sub-Octave with 256 Hz Overtone & Lowpass Filter
+  // Soothing 136.1Hz Grounding Tone with Warm Overtone & Lowpass Filter Sweep
   const startSoothingTone = () => {
     try {
       const ctx = audioContextRef.current || new (window.AudioContext || (window as any).webkitAudioContext)()
@@ -187,21 +187,21 @@ export default function App() {
 
       const filter = ctx.createBiquadFilter()
       filter.type = 'lowpass'
-      filter.frequency.setValueAtTime(240, ctx.currentTime)
+      filter.frequency.setValueAtTime(220, ctx.currentTime)
 
       const masterGain = ctx.createGain()
       masterGain.gain.setValueAtTime(0.001, ctx.currentTime)
-      masterGain.gain.linearRampToValueAtTime(0.08, ctx.currentTime + 3.0)
+      masterGain.gain.linearRampToValueAtTime(0.07, ctx.currentTime + 3.0)
 
       const osc1 = ctx.createOscillator()
       osc1.type = 'sine'
-      osc1.frequency.setValueAtTime(128, ctx.currentTime)
+      osc1.frequency.setValueAtTime(136.1, ctx.currentTime) // Om frequency / grounding
 
       const osc2 = ctx.createOscillator()
       osc2.type = 'sine'
-      osc2.frequency.setValueAtTime(256, ctx.currentTime)
+      osc2.frequency.setValueAtTime(272.2, ctx.currentTime) // Harmonic overtone
       const gain2 = ctx.createGain()
-      gain2.gain.setValueAtTime(0.35, ctx.currentTime)
+      gain2.gain.setValueAtTime(0.3, ctx.currentTime)
 
       osc1.connect(masterGain)
       osc2.connect(gain2)
@@ -1288,10 +1288,10 @@ export default function App() {
               </div>
             )}
 
-            {/* TAB 4: MEDITATE (WITH SOOTHING 128Hz/256Hz TONE) */}
+            {/* TAB 4: MEDITATE (WITH SOOTHING 136.1Hz GROUNDING TONE) */}
             {activeTab === 'meditate' && (
               <div className="text-center py-6 space-y-6">
-                <div className="w-36 h-36 mx-auto rounded-full border-2 border-emerald-500/30 flex items-center justify-center bg-emerald-500/5 shadow-lg">
+                <div className={`w-36 h-36 mx-auto rounded-full border-2 border-emerald-500/30 flex items-center justify-center bg-emerald-500/5 shadow-lg ${isMeditating ? 'animate-breath border-emerald-400' : ''}`}>
                   <span className="text-3xl font-light font-mono text-emerald-400">
                     {Math.floor(meditationSeconds / 60).toString().padStart(2, '0')}:
                     {(meditationSeconds % 60).toString().padStart(2, '0')}
@@ -1334,13 +1334,13 @@ export default function App() {
                 <div>
                   <h2 className="text-base font-medium text-white">
                     {meditationMode === 'singing_bowl' && 'Tibetan Singing Bowl Anchor'}
-                    {meditationMode === 'tone_512' && 'Soothing Sub-Octave Warm Tone (128Hz + 256Hz)'}
+                    {meditationMode === 'tone_512' && 'Soothing Grounding Tone (136.1Hz Om + Warm Overtone)'}
                     {meditationMode === 'guided_breath' && 'Soft Guided Breathwork'}
                   </h2>
                   <p className="text-xs text-zinc-400 mt-1 max-w-xs mx-auto leading-relaxed">
                     {meditationMode === 'singing_bowl' && 'Harmonic singing bowl chimes every 2 minutes to bring you back to awareness.'}
-                    {meditationMode === 'tone_512' && 'Mellow 128Hz sub-octave and 256Hz overtone filtered through a gentle lowpass filter.'}
-                    {meditationMode === 'guided_breath' && 'Soft female voice guiding your nose breathing, hold, and release.'}
+                    {meditationMode === 'tone_512' && 'Warm 136.1Hz Om grounding frequency with harmonic overtones and gentle lowpass filter sweep.'}
+                    {meditationMode === 'guided_breath' && 'Soft female voice guiding your nose breathing, hold, and release with pulsing visual cues.'}
                   </p>
                 </div>
 

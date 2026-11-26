@@ -24,45 +24,61 @@ export default async function handler(req: any, res: any) {
       return res.status(500).json({ error: 'GEMINI_API_KEY is not configured' });
     }
 
-    const models = ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.1-flash-lite'];
+    const models = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-flash-latest', 'gemini-3.5-flash-lite'];
     let geminiRes: Response | null = null;
     let lastErrorText = '';
 
     for (const model of models) {
-      geminiRes = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [
-              {
-                parts: [
-                  {
-                    inline_data: {
-                      mime_type: detectedMime,
-                      data: base64Data
+      let success = false;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        geminiRes = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [
+                {
+                  parts: [
+                    {
+                      inline_data: {
+                        mime_type: detectedMime,
+                        data: base64Data
+                      }
+                    },
+                    {
+                      text: 'Extract receipt details in strict JSON format with keys: store_name (string), receipt_date (YYYY-MM-DD string), total_amount (number), and items (array of objects with name, price, and category where category must be one of: Produce, Dairy, Meat, Pantry, Household).'
                     }
-                  },
-                  {
-                    text: 'Extract receipt details in strict JSON format with keys: store_name (string), receipt_date (YYYY-MM-DD string), total_amount (number), and items (array of objects with name, price, and category where category must be one of: Produce, Dairy, Meat, Pantry, Household).'
-                  }
-                ]
+                  ]
+                }
+              ],
+              generationConfig: {
+                responseMimeType: 'application/json'
               }
-            ],
-            generationConfig: {
-              responseMimeType: 'application/json'
-            }
-          })
-        }
-      );
+            })
+          }
+        );
 
-      if (geminiRes.ok) {
+        if (geminiRes.ok) {
+          success = true;
+          break;
+        }
+
+        lastErrorText = await geminiRes.text();
+        if (geminiRes.status === 429 || geminiRes.status === 503) {
+          const sleepTime = (Math.pow(2, attempt) * 1000) + Math.random() * 500;
+          await new Promise((resolve) => setTimeout(resolve, sleepTime));
+          continue;
+        } else {
+          break;
+        }
+      }
+
+      if (success) {
         break;
       }
 
-      lastErrorText = await geminiRes.text();
-      if (geminiRes.status !== 503 && geminiRes.status !== 429 && geminiRes.status !== 404) {
+      if (geminiRes && geminiRes.status !== 503 && geminiRes.status !== 429 && geminiRes.status !== 404) {
         break;
       }
     }
