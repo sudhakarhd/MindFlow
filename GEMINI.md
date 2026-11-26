@@ -23,3 +23,8 @@
 1. **Feature Branches:** Always create and work on dedicated feature branches (e.g., `feature/my-feature` or `bugfix/my-fix`) for all code changes. Never commit directly to `main`.
 2. **Testing & Validation:** Thoroughly test changes locally (frontend build/lint and backend checks) before merging or pushing.
 3. **No Direct Push:** Never push untested code or push directly to `main`.
+
+## Gemini CLI Guardrails
+
+- **No Broad Directory Scans:** Do NOT run `FindFiles '**/*'` or scan `node_modules/`, `dist/`, `venv/`, or `.git/`. Read only the specific `@file` referenced in the prompt.
+- **Scoped Edits Only:** Make targeted, minimal edits to specific functions rather than rewriting entire large files like `App.tsx` in a single response.

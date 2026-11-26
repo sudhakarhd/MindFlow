@@ -9,12 +9,13 @@ export default async function handler(req: any, res: any) {
       return res.status(400).json({ error: 'Image URL is required' });
     }
 
-    // Fetch image from URL
+    // Fetch image from Supabase Storage URL
     const imageRes = await fetch(imageUrl);
     if (!imageRes.ok) {
-      return res.status(400).json({ error: 'Failed to fetch image from URL' });
+      return res.status(400).json({ error: `Failed to fetch image (${imageRes.status})` });
     }
 
+    const detectedMime = imageRes.headers.get('content-type')?.split(';')[0] || 'image/jpeg';
     const arrayBuffer = await imageRes.arrayBuffer();
     const base64Data = Buffer.from(arrayBuffer).toString('base64');
 
@@ -23,7 +24,7 @@ export default async function handler(req: any, res: any) {
       return res.status(500).json({ error: 'GEMINI_API_KEY is not configured' });
     }
 
-    const models = ['gemini-3.8-flash', 'gemini-3.5-flash-lite', 'gemini-3.8-pro'];
+    const models = ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.1-flash-lite'];
     let geminiRes: Response | null = null;
     let lastErrorText = '';
 
@@ -39,16 +40,19 @@ export default async function handler(req: any, res: any) {
                 parts: [
                   {
                     inline_data: {
-                      mime_type: 'image/jpeg',
+                      mime_type: detectedMime,
                       data: base64Data
                     }
                   },
                   {
-                    text: 'Extract receipt details in strict JSON format with keys: store_name (string), receipt_date (YYYY-MM-DD string), total_amount (number), and items (array of objects with name, price, and category where category must be one of: Produce, Dairy, Meat, Pantry, Household). Return ONLY valid JSON.'
+                    text: 'Extract receipt details in strict JSON format with keys: store_name (string), receipt_date (YYYY-MM-DD string), total_amount (number), and items (array of objects with name, price, and category where category must be one of: Produce, Dairy, Meat, Pantry, Household).'
                   }
                 ]
               }
-            ]
+            ],
+            generationConfig: {
+              responseMimeType: 'application/json'
+            }
           })
         }
       );
@@ -58,7 +62,7 @@ export default async function handler(req: any, res: any) {
       }
 
       lastErrorText = await geminiRes.text();
-      if (geminiRes.status !== 503 && geminiRes.status !== 429) {
+      if (geminiRes.status !== 503 && geminiRes.status !== 429 && geminiRes.status !== 404) {
         break;
       }
     }
@@ -68,7 +72,7 @@ export default async function handler(req: any, res: any) {
     }
 
     const geminiJson = await geminiRes.json();
-    const textResponse = geminiJson?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    const textResponse = geminiJson?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
 
     return res.status(200).json({ response: textResponse });
   } catch (error: any) {
