@@ -12,7 +12,7 @@ export default function App() {
   const [session, setSession] = useState<any>(null)
   const [userProfile, setUserProfile] = useState<any>(null)
   const [allProfiles, setAllProfiles] = useState<any[]>([])
-  const [currentView, setCurrentView] = useState<'wellness' | 'grocery'>('wellness')
+  const [currentView, setCurrentView] = useState<'wellness' | 'grocery' | 'admin'>('wellness')
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
   const [activeTab, setActiveTab] = useState<'feed' | 'capture' | 'somatic' | 'meditate' | 'summary'>('feed')
   const [logs, setLogs] = useState<any[]>([])
@@ -30,6 +30,7 @@ export default function App() {
   const [category, setCategory] = useState<'meal' | 'activity' | 'place' | 'note'>('meal')
   const [title, setTitle] = useState('')
   const [notes, setNotes] = useState('')
+  const [isSharedFeed, setIsSharedFeed] = useState(true)
   const [file, setFile] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const cameraInputRef = useRef<HTMLInputElement>(null)
@@ -43,6 +44,7 @@ export default function App() {
   const [editBillData, setEditBillData] = useState<any>(null)
   const [globalSharedEmails, setGlobalSharedEmails] = useState<string[]>([])
   const [newShareEmailInput, setNewShareEmailInput] = useState('')
+  const [selectedReceiptImage, setSelectedReceiptImage] = useState<string | null>(null)
 
   // Manual Bill Form State
   const [manualStore, setManualStore] = useState('')
@@ -104,6 +106,10 @@ export default function App() {
 
   const userDisplayName = userProfile?.display_name || session?.user?.email?.split('@')[0] || 'User'
   const currentUserId = session?.user?.id
+  const isAdmin = userProfile?.email?.toLowerCase().includes('sudhakarhdev') ||
+                  userProfile?.display_name?.toLowerCase() === 'sudhakarhdev' ||
+                  userProfile?.role === 'admin' ||
+                  session?.user?.email?.toLowerCase().includes('sudhakarhdev')
 
   const fetchLogs = async () => {
     const { data: wLogs } = await supabase
@@ -433,11 +439,12 @@ export default function App() {
       image_url: publicUrl || null,
       author: userDisplayName,
       user_id: currentUserId,
-      is_shared: true
+      is_shared: isSharedFeed
     }])
 
     setTitle('')
     setNotes('')
+    setIsSharedFeed(true)
     setFile(null)
     setPreviewUrl(null)
     setActiveTab('feed')
@@ -705,8 +712,22 @@ export default function App() {
 
   const displayedFeedLogs = logs.filter(l => {
     if (feedFilter === 'mine') return isMine(l)
-    return true
+    return l.is_shared !== false
   })
+
+  // Weekly & Monthly Grocery Expenses
+  const oneWeekAgo = new Date()
+  oneWeekAgo.setDate(oneWeekAgo.getDate() - 7)
+  const weeklyExpensesTotal = groceryBills
+    .filter(b => new Date(b.receipt_date || b.created_at) >= oneWeekAgo)
+    .reduce((sum, b) => sum + Number(b.total_amount || 0), 0)
+
+  const monthlyExpensesTotal = groceryBills
+    .filter(b => {
+      const d = new Date(b.receipt_date || b.created_at)
+      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()
+    })
+    .reduce((sum, b) => sum + Number(b.total_amount || 0), 0)
 
   // Past 7 Days Table for Current User
   const past7Days = Array.from({ length: 7 }).map((_, i) => {
@@ -821,6 +842,18 @@ export default function App() {
                 >
                   <Receipt size={18} /> Grocery & Budget
                 </button>
+                {isAdmin && (
+                  <button
+                    onClick={() => { setCurrentView('admin'); setIsDrawerOpen(false); }}
+                    className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl text-sm font-medium transition-colors ${
+                      currentView === 'admin' 
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' 
+                        : 'text-zinc-300 hover:bg-zinc-800'
+                    }`}
+                  >
+                    <BookOpen size={18} /> Admin Dashboard
+                  </button>
+                )}
               </nav>
             </div>
 
@@ -990,6 +1023,34 @@ export default function App() {
                       </button>
                     )
                   })}
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1">Publish To Feed</label>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setIsSharedFeed(true)}
+                      className={`py-2 px-3 rounded-xl border font-medium transition-colors ${
+                        isSharedFeed 
+                          ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300' 
+                          : 'bg-zinc-900 border-zinc-800 text-zinc-400'
+                      }`}
+                    >
+                      🌐 Family Feed (Shared)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsSharedFeed(false)}
+                      className={`py-2 px-3 rounded-xl border font-medium transition-colors ${
+                        !isSharedFeed 
+                          ? 'bg-purple-500/20 border-purple-500 text-purple-300' 
+                          : 'bg-zinc-900 border-zinc-800 text-zinc-400'
+                      }`}
+                    >
+                      🔒 Personal Feed Only
+                    </button>
+                  </div>
                 </div>
 
                 <div>
@@ -1364,6 +1425,18 @@ export default function App() {
         {/* VIEW 2: GROCERY & BUDGET */}
         {currentView === 'grocery' && (
           <div className="space-y-5">
+            {/* Weekly & Monthly Expense Analytics Cards */}
+            <div className="grid grid-cols-2 gap-2">
+              <div className="bg-zinc-900 border border-zinc-800 p-3.5 rounded-2xl">
+                <span className="text-[10px] uppercase font-semibold text-zinc-500 tracking-wider">This Week (7 Days)</span>
+                <h3 className="text-lg font-bold text-emerald-400 font-mono mt-1">${weeklyExpensesTotal.toFixed(2)}</h3>
+              </div>
+              <div className="bg-zinc-900 border border-zinc-800 p-3.5 rounded-2xl">
+                <span className="text-[10px] uppercase font-semibold text-zinc-500 tracking-wider">This Month</span>
+                <h3 className="text-lg font-bold text-blue-400 font-mono mt-1">${monthlyExpensesTotal.toFixed(2)}</h3>
+              </div>
+            </div>
+
             {/* Mode Sub-navigation: List vs Manual vs Share */}
             <div className="flex bg-zinc-900 p-1 rounded-xl border border-zinc-800 text-xs font-medium">
               <button
@@ -1464,6 +1537,16 @@ export default function App() {
                                   <Edit3 size={13} /> Edit Bill
                                 </button>
                               </div>
+                              {bill.image_url && (
+                                <div className="pt-1">
+                                  <button
+                                    onClick={() => setSelectedReceiptImage(bill.image_url)}
+                                    className="text-xs text-blue-400 hover:text-blue-300 underline flex items-center gap-1"
+                                  >
+                                    <ImageIcon size={14} /> View Receipt Image
+                                  </button>
+                                </div>
+                              )}
                               {bill.shared_with && bill.shared_with.length > 0 && (
                                 <div className="text-[10px] text-indigo-300 bg-indigo-950/40 px-2 py-0.5 rounded border border-indigo-900/40">
                                   Shared with: {bill.shared_with.join(', ')}
@@ -1666,6 +1749,61 @@ export default function App() {
             )}
           </div>
         )}
+
+        {/* VIEW 3: ADMIN DASHBOARD */}
+        {currentView === 'admin' && isAdmin && (
+          <div className="space-y-4">
+            <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-5">
+              <h2 className="font-bold text-base text-amber-300">Admin Dashboard</h2>
+              <p className="text-xs text-zinc-400 mt-1">Default Admin: <strong className="text-white">sudhakarhdev</strong>. Manage user accounts and review registrations.</p>
+            </div>
+
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-3">
+              <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider">Registered Accounts ({allProfiles.length})</h3>
+              {allProfiles.length === 0 ? (
+                <p className="text-xs text-zinc-500 italic">No user profiles recorded yet.</p>
+              ) : (
+                allProfiles.map(prof => (
+                  <div key={prof.id} className="bg-zinc-950 border border-zinc-800 rounded-xl p-3.5 space-y-1 flex justify-between items-center">
+                    <div>
+                      <h4 className="font-semibold text-sm text-white">{prof.display_name || 'User'}</h4>
+                      <p className="text-xs text-zinc-400">{prof.email}</p>
+                      <span className="text-[10px] text-zinc-500">Created: {formatDateTime(prof.created_at || new Date().toISOString())}</span>
+                    </div>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
+                      prof.email?.toLowerCase().includes('sudhakarhdev') || prof.role === 'admin'
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                        : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                    }`}>
+                      {prof.email?.toLowerCase().includes('sudhakarhdev') || prof.role === 'admin' ? 'Admin' : 'Member'}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+      {/* Receipt Image Modal Viewer */}
+      {selectedReceiptImage && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-sm w-full p-4 space-y-3">
+            <div className="flex justify-between items-center">
+              <h3 className="font-semibold text-sm text-white">Scanned Receipt Image</h3>
+              <button onClick={() => setSelectedReceiptImage(null)} className="p-1 text-zinc-400 hover:text-white">
+                <X size={18} />
+              </button>
+            </div>
+            <img src={selectedReceiptImage} alt="Receipt" className="w-full max-h-96 object-contain rounded-xl bg-zinc-950 border border-zinc-800" />
+            <button
+              onClick={() => setSelectedReceiptImage(null)}
+              className="w-full py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-medium rounded-xl"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
       </main>
 
       {/* Bottom Tab Navigation (Only shown in Wellness view) */}
